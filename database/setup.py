@@ -10,15 +10,44 @@ TABLES = {
     "products": DATA_DIR / "products.csv",
 }
 
+CSV_FILES = ["orders.csv", "order_items.csv", "products.csv"]
+
+
+def _download_from_hf_dataset() -> None:
+    """Download CSV files from a HuggingFace Dataset if HF_DATASET_REPO is set."""
+    repo = os.getenv("HF_DATASET_REPO", "").strip()
+    if not repo:
+        return
+
+    from huggingface_hub import hf_hub_download
+
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    for filename in CSV_FILES:
+        target = DATA_DIR / filename
+        if not target.exists():
+            print(f"  Downloading {filename} from HuggingFace Dataset ...")
+            hf_hub_download(
+                repo_id=repo,
+                repo_type="dataset",
+                filename=filename,
+                local_dir=str(DATA_DIR),
+            )
+            print(f"  {filename} downloaded.")
+
 
 def setup_database(force_reload: bool = False) -> None:
+    _download_from_hf_dataset()
+
     conn, lock = get_connection()
     with lock:
         existing = {row[0] for row in conn.execute("SHOW TABLES").fetchall()}
 
         for table, csv_path in TABLES.items():
             if not csv_path.exists():
-                raise FileNotFoundError(f"Data file not found: {csv_path}")
+                raise FileNotFoundError(
+                    f"Data file not found: {csv_path}\n"
+                    f"Set the HF_DATASET_REPO environment variable to auto-download."
+                )
             if table not in existing or force_reload:
                 print(f"  Loading {table} from {csv_path.name} ...")
                 conn.execute(f"""
