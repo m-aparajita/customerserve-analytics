@@ -1,3 +1,13 @@
+---
+title: CustomerServe Analytics Agent
+emoji: 📊
+colorFrom: blue
+colorTo: indigo
+sdk: docker
+app_port: 7860
+pinned: false
+---
+
 # CustomerServe Analytics Agent
 
 A natural-language data analytics agent for retail order/product data.
