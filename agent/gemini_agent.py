@@ -24,7 +24,7 @@ from mcp.tools import TOOL_DECLARATIONS, dispatch, get_schema
 load_dotenv()
 genai.configure(api_key=os.environ["GEMINI_API_KEY"])
 
-_MODEL_NAME = "gemini-1.5-flash"
+_MODEL_NAME = "gemini-2.0-flash"
 _MAX_TOOL_ROUNDS = 8       # safety cap on the agentic loop
 _HISTORY_TURNS = 6         # number of past (user, assistant) pairs to keep
 
