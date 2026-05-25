@@ -12,6 +12,7 @@ _lock = threading.Lock()
 def get_connection() -> tuple[duckdb.DuckDBPyConnection, threading.Lock]:
     global _conn
     if _conn is None:
+        Path(_DB_PATH).parent.mkdir(parents=True, exist_ok=True)
         _conn = duckdb.connect(_DB_PATH)
     return _conn, _lock
 
