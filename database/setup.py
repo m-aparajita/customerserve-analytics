@@ -15,11 +15,8 @@ CSV_FILES = ["orders.csv", "order_items.csv", "products.csv"]
 
 def _download_from_hf_dataset() -> None:
     """Download CSV files from a HuggingFace Dataset if HF_DATASET_REPO is set."""
-    repo = os.getenv("HF_DATASET_REPO", "").strip()
-    print(f"  HF_DATASET_REPO = '{repo}'")
-    if not repo:
-        print("  HF_DATASET_REPO not set — skipping download.")
-        return
+    repo = os.getenv("HF_DATASET_REPO", "aparajita/customerserve-data").strip()
+    print(f"  Downloading CSVs from dataset: {repo}")
 
     from huggingface_hub import hf_hub_download
 
