@@ -74,6 +74,7 @@ TOOL_DECLARATIONS: list[dict] = [
                 "data": {
                     "type": "array",
                     "description": "Array of row objects returned by query_database.",
+                    "items": {"type": "object"},
                 },
                 "chart_type": {
                     "type": "string",
