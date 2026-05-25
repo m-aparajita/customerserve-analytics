@@ -32,9 +32,15 @@ def respond(message: str, history: list, request: gr.Request):
     role = get_role(username)
     agent = get_agent()
 
+    # Convert messages-format history to (user, assistant) tuples for the agent
+    history_tuples = []
+    for i in range(0, len(history) - 1, 2):
+        if i + 1 < len(history):
+            history_tuples.append((history[i]["content"], history[i + 1]["content"]))
+
     text, chart_json = agent.chat(
         user_query=message,
-        history=history,
+        history=history_tuples,
         role=role,
         username=username,
     )
@@ -46,7 +52,10 @@ def respond(message: str, history: list, request: gr.Request):
         except Exception:
             pass
 
-    history = history + [(message, text)]
+    history = history + [
+        {"role": "user",      "content": message},
+        {"role": "assistant", "content": text},
+    ]
     return "", history, fig
 
 
@@ -91,7 +100,7 @@ def build_ui():
         with gr.Row():
             # ── Left column: chat ─────────────────────────────────────────
             with gr.Column(scale=5):
-                chatbot = gr.Chatbot(height=460, label="Conversation", bubble_full_width=False)
+                chatbot = gr.Chatbot(height=460, label="Conversation", type="messages")
 
                 with gr.Row():
                     msg_box = gr.Textbox(
