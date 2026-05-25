@@ -18,8 +18,8 @@ COPY . .
 # HuggingFace Spaces exposes port 7860
 EXPOSE 7860
 
-# DB_PATH points to HF persistent storage volume (/data is mounted by HF)
-ENV DB_PATH=/data/customerserve.duckdb
+# Store DuckDB file alongside the CSV data files (no persistent storage needed)
+ENV DB_PATH=/app/Data/customerserve.duckdb
 ENV DATA_DIR=/app/Data
 
 CMD ["python", "app.py"]
