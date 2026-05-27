@@ -19,11 +19,11 @@ from agent.system_prompt import build as build_prompt
 from auth.roles import Role, VIEWER_TEMPLATES
 from database.logger import log_query
 from guardrails.input_guardrail import check as input_check
-from mcp.tools import TOOL_DECLARATIONS, dispatch, get_schema
+from mcp.tools import TOOL_DECLARATIONS, dispatch
 
 load_dotenv()
 
-_MODEL_NAME = "llama-3.3-70b-versatile"
+_MODEL_NAME = "meta-llama/llama-4-scout-17b-16e-instruct"
 _MAX_TOOL_ROUNDS = 8
 _HISTORY_TURNS = 6
 
@@ -43,7 +43,6 @@ _TOOLS = [
 
 class QueryAgent:
     def __init__(self) -> None:
-        self._schema_cache: str | None = None
         self._client = Groq(api_key=os.environ["GROQ_API_KEY"])
 
     # ── public ────────────────────────────────────────────────────────────────
@@ -80,8 +79,7 @@ class QueryAgent:
                           guardrail_reason="viewer_template_mismatch")
                 return msg, None
 
-        schema = self._get_schema()
-        system_prompt = build_prompt(schema, role, username)
+        system_prompt = build_prompt(role, username)
 
         # Build message list with system prompt and conversation history
         messages: list[dict] = [{"role": "system", "content": system_prompt}]
@@ -153,14 +151,6 @@ class QueryAgent:
                   status="success")
 
         return final_text, chart_json
-
-    # ── private ───────────────────────────────────────────────────────────────
-
-    def _get_schema(self) -> str:
-        if self._schema_cache is None:
-            self._schema_cache = get_schema()
-        return self._schema_cache
-
 
 # Singleton — one agent instance shared across all requests.
 _agent: QueryAgent | None = None
