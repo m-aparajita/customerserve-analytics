@@ -65,15 +65,21 @@ TOOL_DECLARATIONS: list[dict] = [
     {
         "name": "build_chart",
         "description": (
-            "Create a Plotly visualisation from query results. Call after "
-            "query_database once you have the data."
+            "Create a Plotly visualisation from query results. "
+            "You MUST call query_database first and receive its response. "
+            "Then pass the 'rows' array from that response as the 'data' parameter. "
+            "Never pass a function reference — only pass the actual row objects."
         ),
         "parameters": {
             "type": "object",
             "properties": {
                 "data": {
                     "type": "array",
-                    "description": "Array of row objects returned by query_database.",
+                    "description": (
+                        "The literal 'rows' array from query_database's JSON response. "
+                        "Each element is a dict with column names as keys. "
+                        "Example: [{'month': 'Jan', 'revenue': 5000}, ...]"
+                    ),
                     "items": {"type": "object"},
                 },
                 "chart_type": {
