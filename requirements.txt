@@ -1,5 +1,5 @@
 duckdb==1.2.2
-google-generativeai==0.8.5
+groq>=0.9.0
 fastapi==0.115.12
 uvicorn[standard]==0.34.2
 gradio==5.29.1

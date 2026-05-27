@@ -1,10 +1,10 @@
 """
-Gemini 2.0 Flash agent with MCP-style function calling.
+Groq LLaMA agent with OpenAI-compatible function calling.
 
 Flow per user turn:
   1. Input guardrail (Layer 1)
   2. Build role-scoped system prompt
-  3. Send to Gemini with tool declarations
+  3. Send to Groq with tool declarations
   4. Loop: dispatch function calls → feed results back → repeat until text answer
   5. Return (text_answer, chart_json | None)
 """
@@ -12,7 +12,7 @@ Flow per user turn:
 import json
 import os
 
-import google.generativeai as genai
+from groq import Groq
 from dotenv import load_dotenv
 
 from agent.system_prompt import build as build_prompt
@@ -22,20 +22,29 @@ from guardrails.input_guardrail import check as input_check
 from mcp.tools import TOOL_DECLARATIONS, dispatch, get_schema
 
 load_dotenv()
-genai.configure(api_key=os.environ["GEMINI_API_KEY"])
 
-_MODEL_NAME = "gemini-2.0-flash"
-_MAX_TOOL_ROUNDS = 8       # safety cap on the agentic loop
-_HISTORY_TURNS = 6         # number of past (user, assistant) pairs to keep
+_MODEL_NAME = "llama-3.3-70b-versatile"
+_MAX_TOOL_ROUNDS = 8
+_HISTORY_TURNS = 6
+
+# Convert MCP-style declarations to OpenAI/Groq tool format
+_TOOLS = [
+    {
+        "type": "function",
+        "function": {
+            "name": t["name"],
+            "description": t["description"],
+            "parameters": t["parameters"],
+        },
+    }
+    for t in TOOL_DECLARATIONS
+]
 
 
 class QueryAgent:
     def __init__(self) -> None:
         self._schema_cache: str | None = None
-        self._model = genai.GenerativeModel(
-            model_name=_MODEL_NAME,
-            tools=[{"function_declarations": TOOL_DECLARATIONS}],
-        )
+        self._client = Groq(api_key=os.environ["GROQ_API_KEY"])
 
     # ── public ────────────────────────────────────────────────────────────────
 
@@ -74,63 +83,69 @@ class QueryAgent:
         schema = self._get_schema()
         system_prompt = build_prompt(schema, role, username)
 
-        # Build Gemini message history (last N turns)
-        messages: list[dict] = []
+        # Build message list with system prompt and conversation history
+        messages: list[dict] = [{"role": "system", "content": system_prompt}]
         for user_msg, assistant_msg in history[-_HISTORY_TURNS:]:
-            messages.append({"role": "user",  "parts": [{"text": user_msg}]})
-            messages.append({"role": "model", "parts": [{"text": assistant_msg}]})
-
-        full_user_message = f"{system_prompt}\n\nUser question: {user_query}"
+            messages.append({"role": "user", "content": user_msg})
+            messages.append({"role": "assistant", "content": assistant_msg})
+        messages.append({"role": "user", "content": user_query})
 
         log_query(username=username, role=role, user_query=user_query, status="processing")
 
-        # ── agentic tool loop ──────────────────────────────────────────────
-        chat_session = self._model.start_chat(history=messages)
-        response = chat_session.send_message(full_user_message)
-
         chart_json: str | None = None
+        final_text = "I was unable to generate a response."
+        last_msg = None
 
+        # ── agentic tool loop ──────────────────────────────────────────────
         for _ in range(_MAX_TOOL_ROUNDS):
-            fn_calls = [
-                p for p in response.candidates[0].content.parts
-                if p.function_call.name  # non-empty name ⇒ real function call
-            ]
-            if not fn_calls:
+            response = self._client.chat.completions.create(
+                model=_MODEL_NAME,
+                messages=messages,
+                tools=_TOOLS,
+                tool_choice="auto",
+            )
+            last_msg = response.choices[0].message
+
+            # Append assistant's response to the conversation
+            asst_entry: dict = {
+                "role": "assistant",
+                "content": last_msg.content or "",
+            }
+            if last_msg.tool_calls:
+                asst_entry["tool_calls"] = [
+                    {
+                        "id": c.id,
+                        "type": "function",
+                        "function": {
+                            "name": c.function.name,
+                            "arguments": c.function.arguments,
+                        },
+                    }
+                    for c in last_msg.tool_calls
+                ]
+            messages.append(asst_entry)
+
+            if not last_msg.tool_calls:
+                final_text = last_msg.content or final_text
                 break
 
-            tool_responses = []
-            for part in fn_calls:
-                fn_name = part.function_call.name
-                fn_args = dict(part.function_call.args)
+            # Dispatch each tool call and append results
+            for call in last_msg.tool_calls:
+                fn_name = call.function.name
+                fn_args = json.loads(call.function.arguments)
 
                 result_str = dispatch(fn_name, fn_args, role, username)
 
-                # Capture chart JSON for the UI
                 if fn_name == "build_chart":
                     parsed = json.loads(result_str)
                     if "chart_json" in parsed:
                         chart_json = parsed["chart_json"]
 
-                tool_responses.append(
-                    genai.protos.Part(
-                        function_response=genai.protos.FunctionResponse(
-                            name=fn_name,
-                            response={"result": result_str},
-                        )
-                    )
-                )
-
-            response = chat_session.send_message(
-                genai.protos.Content(role="user", parts=tool_responses)
-            )
-
-        # ── extract final text ─────────────────────────────────────────────
-        text_parts = [
-            p.text
-            for p in response.candidates[0].content.parts
-            if hasattr(p, "text") and p.text
-        ]
-        final_text = "".join(text_parts) or "I was unable to generate a response."
+                messages.append({
+                    "role": "tool",
+                    "tool_call_id": call.id,
+                    "content": result_str,
+                })
 
         log_query(username=username, role=role, user_query=user_query,
                   chart_type=json.loads(chart_json).get("chart_type") if chart_json else None,
