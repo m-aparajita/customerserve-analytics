@@ -23,7 +23,7 @@ from mcp.tools import TOOL_DECLARATIONS, dispatch, get_schema
 
 load_dotenv()
 
-_MODEL_NAME = "llama3-groq-70b-8192-tool-use-preview"
+_MODEL_NAME = "llama-3.3-70b-versatile"
 _MAX_TOOL_ROUNDS = 8
 _HISTORY_TURNS = 6
 
