@@ -25,7 +25,7 @@ TOOL_DECLARATIONS: list[dict] = [
             "and row counts. Call this first to understand the available data before "
             "writing any SQL query."
         ),
-        "parameters": {"type": "object", "properties": {}, "required": []},
+        "parameters": {"type": "object", "properties": {}},
     },
     {
         "name": "query_database",
