@@ -202,43 +202,84 @@ def build_chart(data: list, chart_type: str, x_col: str, y_col: str,
     if x_col not in df.columns or (chart_type != "histogram" and y_col not in df.columns):
         return json.dumps({"error": f"Column '{x_col}' or '{y_col}' not found in data."})
 
+    # Aurora-dark colour palette matching the UI theme
+    _PRIMARY   = "#9b6dff"  # purple
+    _SECONDARY = "#22d3ee"  # cyan
+    _PIE_SEQ   = ["#9b6dff", "#22d3ee", "#34d399", "#f59e0b", "#f87171", "#818cf8"]
+
     try:
         if chart_type == "bar":
-            fig = px.bar(df, x=x_col, y=y_col, title=title)
+            fig = px.bar(df, x=x_col, y=y_col, title=title,
+                         color_discrete_sequence=[_PRIMARY])
             _apply_abbrev_y_axis(fig, df[y_col])
             fig.update_traces(
                 hovertemplate=f"%{{x}}<br>{y_col}: %{{y:,.2f}}<extra></extra>"
             )
         elif chart_type == "line":
-            fig = px.line(df, x=x_col, y=y_col, title=title, markers=True)
+            fig = px.line(df, x=x_col, y=y_col, title=title, markers=True,
+                          color_discrete_sequence=[_PRIMARY])
             _apply_abbrev_y_axis(fig, df[y_col])
             fig.update_traces(
-                hovertemplate=f"%{{x}}<br>{y_col}: %{{y:,.2f}}<extra></extra>"
+                hovertemplate=f"%{{x}}<br>{y_col}: %{{y:,.2f}}<extra></extra>",
+                line=dict(width=2.5),
+                marker=dict(size=6),
             )
         elif chart_type == "pie":
-            fig = px.pie(df, names=x_col, values=y_col, title=title)
+            fig = px.pie(df, names=x_col, values=y_col, title=title,
+                         color_discrete_sequence=_PIE_SEQ)
             fig.update_traces(
-                hovertemplate="%{label}<br>Value: %{value:,.2f}<br>%{percent}<extra></extra>"
+                hovertemplate="%{label}<br>Value: %{value:,.2f}<br>%{percent}<extra></extra>",
+                textfont=dict(color="#f0f0f8"),
             )
         elif chart_type == "scatter":
-            fig = px.scatter(df, x=x_col, y=y_col, title=title)
+            fig = px.scatter(df, x=x_col, y=y_col, title=title,
+                             color_discrete_sequence=[_PRIMARY])
             _apply_abbrev_y_axis(fig, df[y_col])
             fig.update_traces(
-                hovertemplate=f"%{{x}}<br>{y_col}: %{{y:,.2f}}<extra></extra>"
+                hovertemplate=f"%{{x}}<br>{y_col}: %{{y:,.2f}}<extra></extra>",
+                marker=dict(size=8, opacity=0.85),
             )
         elif chart_type == "histogram":
-            fig = px.histogram(df, x=x_col, title=title)
+            fig = px.histogram(df, x=x_col, title=title,
+                               color_discrete_sequence=[_PRIMARY])
             fig.update_traces(
                 hovertemplate=f"{x_col}: %{{x}}<br>Count: %{{y:,}}<extra></extra>"
             )
         else:
-            fig = px.bar(df, x=x_col, y=y_col, title=title)
+            fig = px.bar(df, x=x_col, y=y_col, title=title,
+                         color_discrete_sequence=[_PRIMARY])
             _apply_abbrev_y_axis(fig, df[y_col])
             fig.update_traces(
                 hovertemplate=f"%{{x}}<br>{y_col}: %{{y:,.2f}}<extra></extra>"
             )
 
-        fig.update_layout(template="plotly_white")
+        fig.update_layout(
+            paper_bgcolor="rgba(0,0,0,0)",
+            plot_bgcolor="rgba(22, 24, 44, 0.55)",
+            font=dict(family="Inter, system-ui, sans-serif", color="#f0f0f8", size=12),
+            title=dict(font=dict(family="Space Grotesk, sans-serif", size=16, color="#f0f0f8")),
+            xaxis=dict(
+                gridcolor="rgba(255,255,255,0.06)",
+                linecolor="rgba(255,255,255,0.10)",
+                tickfont=dict(color="#b4b4c8"),
+            ),
+            yaxis=dict(
+                gridcolor="rgba(255,255,255,0.06)",
+                linecolor="rgba(255,255,255,0.10)",
+                tickfont=dict(color="#b4b4c8"),
+            ),
+            hoverlabel=dict(
+                bgcolor="rgba(33, 36, 61, 0.95)",
+                bordercolor="rgba(255,255,255,0.12)",
+                font=dict(color="#f0f0f8", size=12),
+            ),
+            legend=dict(
+                bgcolor="rgba(33,36,61,0.7)",
+                bordercolor="rgba(255,255,255,0.08)",
+                font=dict(color="#c8c8de"),
+            ),
+            margin=dict(t=50, l=10, r=10, b=10),
+        )
         return json.dumps({"chart_json": fig.to_json(), "chart_type": chart_type})
     except Exception as exc:
         return json.dumps({"error": str(exc)})
