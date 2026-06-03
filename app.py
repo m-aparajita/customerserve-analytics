@@ -49,8 +49,8 @@ def respond(message: str, history: list, request: gr.Request):
     if chart_json:
         try:
             fig = pio.from_json(chart_json)
-        except Exception:
-            pass
+        except Exception as e:
+            text += f"\n\n*(Chart could not be rendered: {e})*"
 
     history = history + [
         {"role": "user",      "content": message},
