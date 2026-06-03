@@ -182,9 +182,9 @@ def _apply_abbrev_y_axis(fig, series: pd.Series) -> None:
         mn, mx = float(series.min()), float(series.max())
         if mn == mx:
             return
-        tickvals = np.linspace(mn, mx, 6).tolist()
+        tickvals = np.linspace(mn, mx, 5).tolist()
         ticktext = [_format_abbrev(v) for v in tickvals]
-        fig.update_yaxes(tickvals=tickvals, ticktext=ticktext)
+        fig.update_yaxes(tickvals=tickvals, ticktext=ticktext, automargin=True)
     except Exception:
         pass
 
@@ -202,10 +202,10 @@ def build_chart(data: list, chart_type: str, x_col: str, y_col: str,
     if x_col not in df.columns or (chart_type != "histogram" and y_col not in df.columns):
         return json.dumps({"error": f"Column '{x_col}' or '{y_col}' not found in data."})
 
-    # Aurora-dark colour palette matching the UI theme
-    _PRIMARY   = "#9b6dff"  # purple
-    _SECONDARY = "#22d3ee"  # cyan
-    _PIE_SEQ   = ["#9b6dff", "#22d3ee", "#34d399", "#f59e0b", "#f87171", "#818cf8"]
+    # Colours that read clearly on a light/white background
+    _PRIMARY   = "#7c3aed"   # deep violet
+    _SECONDARY = "#0891b2"   # dark cyan
+    _PIE_SEQ   = ["#7c3aed", "#0891b2", "#059669", "#d97706", "#dc2626", "#4f46e5"]
 
     try:
         if chart_type == "bar":
@@ -255,30 +255,32 @@ def build_chart(data: list, chart_type: str, x_col: str, y_col: str,
 
         fig.update_layout(
             paper_bgcolor="rgba(0,0,0,0)",
-            plot_bgcolor="rgba(22, 24, 44, 0.55)",
-            font=dict(family="Inter, system-ui, sans-serif", color="#f0f0f8", size=12),
-            title=dict(font=dict(family="Space Grotesk, sans-serif", size=16, color="#f0f0f8")),
+            plot_bgcolor="rgba(245,243,255,0.55)",
+            font=dict(family="Inter, system-ui, sans-serif", color="#1e1b4b", size=12),
+            title=dict(font=dict(family="Space Grotesk, sans-serif", size=15, color="#3b0764")),
             xaxis=dict(
-                gridcolor="rgba(255,255,255,0.06)",
-                linecolor="rgba(255,255,255,0.10)",
-                tickfont=dict(color="#b4b4c8"),
+                gridcolor="rgba(0,0,0,0.07)",
+                linecolor="rgba(0,0,0,0.15)",
+                tickfont=dict(color="#374151", size=11),
+                automargin=True,
             ),
             yaxis=dict(
-                gridcolor="rgba(255,255,255,0.06)",
-                linecolor="rgba(255,255,255,0.10)",
-                tickfont=dict(color="#b4b4c8"),
+                gridcolor="rgba(0,0,0,0.07)",
+                linecolor="rgba(0,0,0,0.15)",
+                tickfont=dict(color="#374151", size=11),
+                automargin=True,
             ),
             hoverlabel=dict(
-                bgcolor="rgba(33, 36, 61, 0.95)",
-                bordercolor="rgba(255,255,255,0.12)",
-                font=dict(color="#f0f0f8", size=12),
+                bgcolor="#1e1b4b",
+                bordercolor="rgba(124,58,237,0.40)",
+                font=dict(color="#ffffff", size=12),
             ),
             legend=dict(
-                bgcolor="rgba(33,36,61,0.7)",
-                bordercolor="rgba(255,255,255,0.08)",
-                font=dict(color="#c8c8de"),
+                bgcolor="rgba(255,255,255,0.85)",
+                bordercolor="rgba(0,0,0,0.10)",
+                font=dict(color="#1e1b4b"),
             ),
-            margin=dict(t=50, l=10, r=10, b=10),
+            margin=dict(t=50, l=70, r=20, b=55),
         )
         return json.dumps({"chart_json": fig.to_json(), "chart_type": chart_type})
     except Exception as exc:

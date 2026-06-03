@@ -1,6 +1,7 @@
 """
 CustomerServe Analytics Agent — Gradio UI
 Single-column layout: heading → description → query → templates → response → chart
+Light theme with violet/cyan accent — works reliably with Gradio's default rendering.
 """
 
 import os
@@ -21,133 +22,128 @@ from auth.roles import VIEWER_TEMPLATES, Role
 
 
 # ── CSS ───────────────────────────────────────────────────────────────────────
-# Strategy: dark page + strip every Gradio block border/bg + force white text
+# Keep Gradio's white background. Only override: fonts, colours, borders, spacing.
 
 CSS = """
-@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@600;700&family=Inter:wght@400;500&display=swap');
-
-/* Page background */
-html, body {
-    background: #0d0f1a !important;
-    font-family: 'Inter', system-ui, sans-serif !important;
-    color: #f0f0fa !important;
-}
+@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@600;700&family=Inter:wght@400;500;600&display=swap');
 
 /* Hide Gradio footer */
 footer, .built-with { display: none !important; }
 
-/* Center and pad the app */
+/* Container width and font */
 .gradio-container {
-    background: transparent !important;
+    font-family: 'Inter', system-ui, sans-serif !important;
     max-width: 820px !important;
     margin: 0 auto !important;
-    padding: 2rem 1.25rem 4rem !important;
+    padding: 1rem 1.25rem 4rem !important;
 }
 
-/* ── Strip every block/card/panel border and background ── */
-.block, .form, .gap, .panel, .wrap, .padded {
-    background: transparent !important;
-    border: none !important;
+/* Strip decorative block borders; keep backgrounds intact */
+.block, .form, .gap, .panel {
     box-shadow: none !important;
-    border-radius: 0 !important;
-    padding: 0 !important;
-    margin-bottom: 0 !important;
+    border: none !important;
 }
-
-/* ── Force ALL text inside app to white ── */
-.gradio-container * { color: #f0f0fa !important; }
 
 /* ── Labels above inputs ── */
 .label-wrap span {
-    font-size: 0.7rem !important;
+    font-size: 0.70rem !important;
     font-weight: 600 !important;
     text-transform: uppercase !important;
     letter-spacing: 0.15em !important;
-    color: rgba(155,109,255,0.90) !important;
+    color: #5b21b6 !important;
+    font-family: 'Inter', sans-serif !important;
 }
 
 /* ── Query textarea ── */
 textarea {
-    background: #161824 !important;
-    border: 2px solid rgba(155,109,255,0.45) !important;
-    color: #ffffff !important;
     font-family: 'Inter', sans-serif !important;
     font-size: 1rem !important;
-    line-height: 1.6 !important;
+    color: #1e1b4b !important;
+    background: #ffffff !important;
+    border: 2px solid #c4b5fd !important;
     border-radius: 0.75rem !important;
     padding: 0.875rem 1rem !important;
+    line-height: 1.6 !important;
     resize: none !important;
-    width: 100% !important;
-    box-sizing: border-box !important;
 }
 textarea:focus {
-    border-color: #9b6dff !important;
-    box-shadow: 0 0 0 3px rgba(155,109,255,0.18) !important;
+    border-color: #7c3aed !important;
+    box-shadow: 0 0 0 3px rgba(124,58,237,0.12) !important;
     outline: none !important;
 }
-textarea::placeholder { color: rgba(160,160,210,0.40) !important; }
+textarea::placeholder { color: #a5a5c8 !important; }
 
 /* ── Send button ── */
 button.primary {
-    background: linear-gradient(135deg, #9b6dff 0%, #22d3ee 100%) !important;
+    background: linear-gradient(135deg, #7c3aed 0%, #0891b2 100%) !important;
     border: none !important;
-    color: #06070d !important;
+    color: #ffffff !important;
     font-family: 'Inter', sans-serif !important;
     font-weight: 700 !important;
     font-size: 1rem !important;
     border-radius: 0.75rem !important;
-    padding: 0.75rem 1.5rem !important;
     width: 100% !important;
-    box-shadow: 0 4px 20px -4px rgba(155,109,255,0.60) !important;
+    padding: 0.75rem !important;
+    box-shadow: 0 4px 16px -4px rgba(124,58,237,0.40) !important;
     cursor: pointer !important;
 }
-button.primary:hover { opacity: 0.82 !important; }
+button.primary:hover { opacity: 0.86 !important; }
 
 /* ── Template buttons ── */
 button:not(.primary) {
-    background: #161824 !important;
-    border: 1px solid rgba(255,255,255,0.14) !important;
-    color: #d0d0ea !important;
+    background: #f5f3ff !important;
+    border: 1px solid #ddd6fe !important;
+    color: #3b0764 !important;
     font-family: 'Inter', sans-serif !important;
     font-size: 0.82rem !important;
     border-radius: 0.55rem !important;
-    padding: 0.5rem 0.85rem !important;
     text-align: left !important;
     white-space: normal !important;
     width: 100% !important;
+    line-height: 1.45 !important;
+    padding: 0.5rem 0.85rem !important;
     cursor: pointer !important;
-    line-height: 1.4 !important;
 }
 button:not(.primary):hover {
-    border-color: rgba(155,109,255,0.55) !important;
-    color: #ffffff !important;
+    background: #ede9fe !important;
+    border-color: #7c3aed !important;
+    color: #1e1b4b !important;
 }
 
-/* ── Chatbot shell ── */
+/* ── Chatbot container ── */
 .chatbot {
-    background: #13152a !important;
-    border: 1px solid rgba(255,255,255,0.10) !important;
+    border: 1.5px solid #e2e8f0 !important;
     border-radius: 0.875rem !important;
+    background: #fafafa !important;
 }
+
 /* User bubble */
 .message.user .bubble-wrap {
-    background: rgba(75,45,170,0.30) !important;
-    border: 1px solid rgba(155,109,255,0.35) !important;
+    background: #ede9fe !important;
+    border: 1px solid #c4b5fd !important;
     border-radius: 0.75rem !important;
 }
 /* Bot bubble */
 .message.bot .bubble-wrap {
-    background: rgba(18,20,42,0.95) !important;
-    border: 1px solid rgba(255,255,255,0.09) !important;
+    background: #ffffff !important;
+    border: 1px solid #e2e8f0 !important;
     border-radius: 0.75rem !important;
 }
-.message p, .message li, .message span { color: #f0f0fa !important; line-height: 1.7 !important; }
+/* Message text — force dark so it reads on white/lavender bubbles */
+.message p, .message li, .message h1, .message h2,
+.message h3, .message strong, .message em {
+    color: #1e1b4b !important;
+    font-family: 'Inter', sans-serif !important;
+    line-height: 1.7 !important;
+}
 .message code {
-    background: rgba(155,109,255,0.20) !important;
-    color: #c4b5fd !important;
+    background: #ede9fe !important;
+    color: #5b21b6 !important;
     border-radius: 0.25rem !important;
     padding: 0.1em 0.4em !important;
+    font-size: 0.88em !important;
 }
+.message span { color: #1e1b4b !important; }
 
 /* ── Chart area ── */
 .plot-container, .plot-container > div, .js-plotly-plot {
@@ -159,9 +155,10 @@ button:not(.primary):hover {
 /* ── Slim scrollbar ── */
 ::-webkit-scrollbar { width: 4px; height: 4px; }
 ::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: rgba(155,109,255,0.30); border-radius: 4px; }
-::-webkit-scrollbar-thumb:hover { background: rgba(155,109,255,0.55); }
+::-webkit-scrollbar-thumb { background: rgba(124,58,237,0.25); border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(124,58,237,0.50); }
 """
+
 
 # ── Static HTML blocks ────────────────────────────────────────────────────────
 
@@ -169,46 +166,56 @@ def _heading_html(username: str = "", role_label: str = "") -> str:
     badge = ""
     if username:
         badge = (
-            f"<span style='background:linear-gradient(135deg,#9b6dff,#22d3ee);"
-            f"color:#06070d;padding:4px 14px;border-radius:999px;"
-            f"font-size:0.76rem;font-weight:700;font-family:Inter,sans-serif;"
-            f"letter-spacing:0.05em;vertical-align:middle;'>"
-            f"{username}&nbsp;·&nbsp;{role_label}</span>"
+            f"<span style='"
+            f"background:linear-gradient(135deg,#7c3aed,#0891b2);"
+            f"color:#ffffff;"
+            f"padding:5px 16px;border-radius:999px;"
+            f"font-size:0.78rem;font-weight:700;"
+            f"font-family:Inter,sans-serif;letter-spacing:0.05em;"
+            f"box-shadow:0 2px 10px rgba(124,58,237,0.30);'>"
+            f"{username}&nbsp;·&nbsp;{role_label}"
+            f"</span>"
         )
     return f"""
-<div style='display:flex;justify-content:space-between;align-items:flex-start;
-            padding:1rem 0 0.25rem;'>
+<div style="display:flex;justify-content:space-between;align-items:flex-start;
+            padding:1.25rem 0 0.5rem;">
   <div>
-    <h1 style='font-family:"Space Grotesk",sans-serif;
-               font-size:clamp(1.9rem,4vw,2.7rem);
-               font-weight:700;letter-spacing:-0.03em;
-               line-height:1.15;margin:0 0 0.5rem;
-               background:linear-gradient(130deg,#c4b5fd,#9b6dff 50%,#22d3ee);
-               -webkit-background-clip:text;background-clip:text;
-               color:transparent;'>
+    <h1 style="font-family:'Space Grotesk',sans-serif;
+               font-size:clamp(1.8rem,4vw,2.6rem);
+               font-weight:700;
+               letter-spacing:-0.025em;
+               line-height:1.15;
+               margin:0 0 0.55rem;
+               color:#3b0764;">
       CustomerServe Analytics
     </h1>
-    <p style='font-size:0.9rem;color:rgba(190,190,230,0.72);
-              line-height:1.6;margin:0;max-width:560px;
-              font-family:Inter,sans-serif;'>
+    <p style="font-size:0.92rem;
+              color:#374151;
+              line-height:1.65;
+              margin:0;
+              max-width:560px;
+              font-family:Inter,sans-serif;">
       Ask questions about orders, products, and sales in plain English.
       The agent writes SQL, queries the database, and draws charts for you.
     </p>
   </div>
-  <div style='flex-shrink:0;padding-top:0.25rem;'>{badge}</div>
+  <div style="flex-shrink:0;padding-top:0.35rem;">{badge}</div>
 </div>
-<hr style='border:none;border-top:1px solid rgba(255,255,255,0.09);margin:1.25rem 0 0;'>
+<hr style="border:none;border-top:2px solid #ede9fe;margin:0.5rem 0 0;">
 """
 
 _TPL_HEADING = """
-<p style='font-size:0.68rem;font-weight:600;text-transform:uppercase;
-          letter-spacing:0.18em;color:rgba(155,109,255,0.85);
-          margin:1.25rem 0 0.6rem;font-family:Inter,sans-serif;'>
-  Quick templates — click to fill the box above
+<p style="font-size:0.70rem;font-weight:600;text-transform:uppercase;
+          letter-spacing:0.16em;color:#5b21b6;
+          margin:1.25rem 0 0.65rem;font-family:Inter,sans-serif;">
+  Quick templates &mdash; click to fill the box above
 </p>
 """
 
-_DIVIDER = "<hr style='border:none;border-top:1px solid rgba(255,255,255,0.09);margin:1.5rem 0;'>"
+_DIVIDER = (
+    "<hr style='border:none;border-top:2px solid #ede9fe;"
+    "margin:1.5rem 0;'>"
+)
 
 
 # ── Handlers ──────────────────────────────────────────────────────────────────
@@ -244,7 +251,7 @@ def respond(message: str, history: list, request: gr.Request):
     return "", history, fig
 
 
-def fill_input(template: str):
+def fill_input(template: str) -> str:
     return template
 
 
@@ -260,14 +267,18 @@ def build_heading(request: gr.Request) -> str:
 def build_ui():
     with gr.Blocks(
         title="CustomerServe Analytics",
-        theme=gr.themes.Base(),
+        theme=gr.themes.Soft(
+            primary_hue="violet",
+            secondary_hue="cyan",
+            font=gr.themes.GoogleFont("Inter"),
+        ),
         css=CSS,
     ) as demo:
 
-        # 1. Page heading + description + role badge (inline HTML, no Gradio columns)
+        # 1 ── Heading + description + role badge
         heading = gr.HTML(value=_heading_html())
 
-        # 2. Query input field
+        # 2 ── Query input
         msg_box = gr.Textbox(
             placeholder="e.g.  Show me monthly revenue for 2024 …",
             label="Your question",
@@ -275,34 +286,33 @@ def build_ui():
             max_lines=8,
         )
 
-        # 3. Send button
+        # 3 ── Send button
         send_btn = gr.Button("Send →", variant="primary")
 
-        # 4. Templates
+        # 4 ── Templates
         gr.HTML(_TPL_HEADING)
         tpl_btns = []
-        # Two template buttons per row for compactness, still single logical column
         for i in range(0, len(VIEWER_TEMPLATES), 2):
             with gr.Row():
                 for tpl in VIEWER_TEMPLATES[i : i + 2]:
                     b = gr.Button(tpl, size="sm")
                     tpl_btns.append((b, tpl))
 
-        # 5. Divider
+        # 5 ── Divider
         gr.HTML(_DIVIDER)
 
-        # 6. Text response area
+        # 6 ── Response area
         chatbot = gr.Chatbot(
             height=380,
             show_label=False,
             type="messages",
-            placeholder="*Your results will appear here …*",
+            placeholder="*Results will appear here after you send a question.*",
         )
 
-        # 7. Visualisation chart
+        # 7 ── Visualisation
         chart_output = gr.Plot(show_label=False)
 
-        # ── Wire everything ───────────────────────────────────────────────
+        # ── Events ───────────────────────────────────────────────────────
         send_btn.click(
             fn=respond,
             inputs=[msg_box, chatbot],
@@ -316,7 +326,6 @@ def build_ui():
         for btn, tpl in tpl_btns:
             btn.click(fn=fill_input, inputs=gr.State(tpl), outputs=msg_box)
 
-        # Populate heading with role badge after login
         demo.load(fn=build_heading, outputs=heading)
 
     return demo
