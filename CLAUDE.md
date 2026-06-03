@@ -2,7 +2,7 @@
 
 Natural-language analytics agent for retail order data. Users ask questions in plain English; the agent writes SQL, queries DuckDB, and renders Plotly charts in a Gradio UI.
 
-**Deploy target:** HuggingFace Spaces (Docker, free tier) — push to both `origin` (GitHub) and `hf` (HuggingFace) remotes.
+**Two live environments:** `hf` = interview Space (stable), `hf-dev` = dev Space (experimental). Active branch: `dev`. Promote to `main` only when ready.
 
 ---
 
@@ -50,8 +50,11 @@ python app.py
 
 ## Deploy
 
-```powershell
-git push origin main && git push hf main
-```
+| Target | Command | When |
+|--------|---------|------|
+| Dev Space (test) | `git push origin dev && git push hf-dev dev:main` | After any `dev` commit |
+| Interview Space (stable) | `git checkout main && git merge dev && git push origin main && git push hf main` | Only when fully satisfied |
 
-HF Spaces secrets needed: `GROQ_API_KEY`, `ADMIN_PASSWORD`, `ANALYST_PASSWORD`, `VIEWER_PASSWORD`.
+HF Spaces secrets (both Spaces): `GROQ_API_KEY`, `ADMIN_PASSWORD`, `ANALYST_PASSWORD`, `VIEWER_PASSWORD`.
+
+Rollback: `git checkout v1.0` restores the last known-good interview version.
