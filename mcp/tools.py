@@ -7,6 +7,7 @@ the same definitions can be handed to Gemini's function-calling API.
 
 import json
 import time
+import numpy as np
 import pandas as pd
 import plotly.express as px
 
@@ -163,6 +164,31 @@ def get_sample_data(table: str, limit: int = 5) -> str:
     return json.dumps({"columns": list(df.columns), "rows": df.to_dict(orient="records")}, default=str)
 
 
+def _format_abbrev(v: float) -> str:
+    """Return a K / Mn / Bn abbreviated label for a number."""
+    abs_v = abs(v)
+    if abs_v >= 1_000_000_000:
+        return f"{v / 1_000_000_000:.2f}Bn"
+    if abs_v >= 1_000_000:
+        return f"{v / 1_000_000:.2f}Mn"
+    if abs_v >= 1_000:
+        return f"{v / 1_000:.2f}K"
+    return f"{v:.2f}"
+
+
+def _apply_abbrev_y_axis(fig, series: pd.Series) -> None:
+    """Replace y-axis tick labels with K / Mn / Bn abbreviations."""
+    try:
+        mn, mx = float(series.min()), float(series.max())
+        if mn == mx:
+            return
+        tickvals = np.linspace(mn, mx, 6).tolist()
+        ticktext = [_format_abbrev(v) for v in tickvals]
+        fig.update_yaxes(tickvals=tickvals, ticktext=ticktext)
+    except Exception:
+        pass
+
+
 def build_chart(data: list, chart_type: str, x_col: str, y_col: str,
                 title: str = "", role: Role = Role.ANALYST) -> str:
     allowed = PERMISSIONS[role].allowed_charts
@@ -179,16 +205,38 @@ def build_chart(data: list, chart_type: str, x_col: str, y_col: str,
     try:
         if chart_type == "bar":
             fig = px.bar(df, x=x_col, y=y_col, title=title)
+            _apply_abbrev_y_axis(fig, df[y_col])
+            fig.update_traces(
+                hovertemplate=f"%{{x}}<br>{y_col}: %{{y:,.2f}}<extra></extra>"
+            )
         elif chart_type == "line":
             fig = px.line(df, x=x_col, y=y_col, title=title, markers=True)
+            _apply_abbrev_y_axis(fig, df[y_col])
+            fig.update_traces(
+                hovertemplate=f"%{{x}}<br>{y_col}: %{{y:,.2f}}<extra></extra>"
+            )
         elif chart_type == "pie":
             fig = px.pie(df, names=x_col, values=y_col, title=title)
+            fig.update_traces(
+                hovertemplate="%{label}<br>Value: %{value:,.2f}<br>%{percent}<extra></extra>"
+            )
         elif chart_type == "scatter":
             fig = px.scatter(df, x=x_col, y=y_col, title=title)
+            _apply_abbrev_y_axis(fig, df[y_col])
+            fig.update_traces(
+                hovertemplate=f"%{{x}}<br>{y_col}: %{{y:,.2f}}<extra></extra>"
+            )
         elif chart_type == "histogram":
             fig = px.histogram(df, x=x_col, title=title)
+            fig.update_traces(
+                hovertemplate=f"{x_col}: %{{x}}<br>Count: %{{y:,}}<extra></extra>"
+            )
         else:
             fig = px.bar(df, x=x_col, y=y_col, title=title)
+            _apply_abbrev_y_axis(fig, df[y_col])
+            fig.update_traces(
+                hovertemplate=f"%{{x}}<br>{y_col}: %{{y:,.2f}}<extra></extra>"
+            )
 
         fig.update_layout(template="plotly_white")
         return json.dumps({"chart_json": fig.to_json(), "chart_type": chart_type})
