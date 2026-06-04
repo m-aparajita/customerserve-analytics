@@ -12,13 +12,17 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from database.setup import setup_database
-print("Initialising database …")
-setup_database()
-print("Database ready.")
-
+from mcp.tools import get_schema, get_schema_html
 from agent.gemini_agent import get_agent
 from auth.manager import get_role, gradio_auth_pairs
-from auth.roles import VIEWER_TEMPLATES, Role
+from auth.roles import VIEWER_TEMPLATES, Role, PERMISSIONS
+
+print("Initialising database …")
+setup_database()
+
+print("Pre-loading schema cache …")
+get_schema()
+print("Schema cached.")
 
 
 # ── CSS ───────────────────────────────────────────────────────────────────────
@@ -152,6 +156,21 @@ button:not(.primary):hover {
     box-shadow: none !important;
 }
 
+/* ── Schema accordion ── */
+.schema-ref > .label-wrap > span {
+    font-size: 0.72rem !important;
+    font-weight: 600 !important;
+    text-transform: uppercase !important;
+    letter-spacing: 0.13em !important;
+    color: #5b21b6 !important;
+}
+.schema-ref {
+    background: #faf9ff !important;
+    border: 1px solid #ede9fe !important;
+    border-radius: 0.65rem !important;
+    margin-bottom: 0.25rem !important;
+}
+
 /* ── Slim scrollbar ── */
 ::-webkit-scrollbar { width: 4px; height: 4px; }
 ::-webkit-scrollbar-track { background: transparent; }
@@ -255,6 +274,15 @@ def fill_input(template: str) -> str:
     return template
 
 
+def build_schema_panel(request: gr.Request) -> tuple:
+    if not request or not request.username:
+        return gr.update(visible=False), gr.update(value="")
+    role = get_role(request.username)
+    if not PERMISSIONS[role].can_see_schema:
+        return gr.update(visible=False), gr.update(value="")
+    return gr.update(visible=True), gr.update(value=get_schema_html())
+
+
 def build_heading(request: gr.Request) -> str:
     if not request or not request.username:
         return _heading_html()
@@ -278,7 +306,16 @@ def build_ui():
         # 1 ── Heading + description + role badge
         heading = gr.HTML(value=_heading_html())
 
-        # 2 ── Query input
+        # 2 ── Schema reference accordion (ADMIN / ANALYST only; hidden until load)
+        with gr.Accordion(
+            "📋  Schema Reference — click to explore the data",
+            open=False,
+            visible=False,
+            elem_classes=["schema-ref"],
+        ) as schema_accordion:
+            schema_panel = gr.HTML("")
+
+        # 3 ── Query input
         msg_box = gr.Textbox(
             placeholder="e.g.  Show me monthly revenue for 2024 …",
             label="Your question",
@@ -286,7 +323,7 @@ def build_ui():
             max_lines=8,
         )
 
-        # 3 ── Send button
+        # 4 ── Send button
         send_btn = gr.Button("Send →", variant="primary")
 
         # 4 ── Templates
@@ -327,6 +364,7 @@ def build_ui():
             btn.click(fn=fill_input, inputs=gr.State(tpl), outputs=msg_box)
 
         demo.load(fn=build_heading, outputs=heading)
+        demo.load(fn=build_schema_panel, outputs=[schema_accordion, schema_panel])
 
     return demo
 

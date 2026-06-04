@@ -2,7 +2,7 @@
 MCP-compatible tool definitions and implementations.
 
 Each tool is described with a JSON schema matching the MCP tool-call spec so
-the same definitions can be handed to Gemini's function-calling API.
+the same definitions can be handed to the LLM's function-calling API.
 """
 
 import json
@@ -107,7 +107,19 @@ TOOL_DECLARATIONS: list[dict] = [
 
 # ── Tool implementations ──────────────────────────────────────────────────────
 
+_schema_cache: str | None = None
+
+_TABLE_ICONS: dict[str, str] = {
+    "orders": "🛒",
+    "order_items": "📦",
+    "products": "🏷️",
+}
+
+
 def get_schema() -> str:
+    global _schema_cache
+    if _schema_cache is not None:
+        return _schema_cache
     conn, lock = get_connection()
     with lock:
         tables = [r[0] for r in conn.execute("SHOW TABLES").fetchall()]
@@ -121,7 +133,55 @@ def get_schema() -> str:
                 "row_count": count,
                 "columns": [{"name": c[0], "type": c[1]} for c in cols],
             }
-    return json.dumps(schema, indent=2)
+    _schema_cache = json.dumps(schema, indent=2)
+    return _schema_cache
+
+
+def get_schema_html() -> str:
+    """Return a formatted HTML glossary of the schema for display in the UI."""
+    schema = json.loads(get_schema())
+    panels = ""
+    for tbl, info in schema.items():
+        icon = _TABLE_ICONS.get(tbl, "📋")
+        count_fmt = f"{info['row_count']:,}"
+        col_rows = "".join(
+            f"<tr>"
+            f"<td style='padding:2px 10px 2px 0;color:#1e1b4b;"
+            f"font-family:\"Courier New\",monospace;font-size:0.80rem;"
+            f"white-space:nowrap;'>{c['name']}</td>"
+            f"<td style='padding:2px 0;color:#6b7280;font-size:0.75rem;"
+            f"font-family:monospace;'>{c['type']}</td>"
+            f"</tr>"
+            for c in info["columns"]
+        )
+        panels += (
+            f"<div style='min-width:200px;flex:1;padding:0.75rem 1rem;"
+            f"background:#faf9ff;border:1px solid #ede9fe;border-radius:0.65rem;'>"
+            f"<div style='font-family:\"Space Grotesk\",sans-serif;font-weight:700;"
+            f"font-size:0.85rem;color:#5b21b6;margin-bottom:0.5rem;'>"
+            f"{icon} {tbl}"
+            f"<span style='font-weight:400;color:#9ca3af;font-size:0.75rem;"
+            f"margin-left:0.4rem;'>{count_fmt} rows</span></div>"
+            f"<table style='border-collapse:collapse;width:100%;'>"
+            f"<thead><tr>"
+            f"<th style='text-align:left;font-size:0.65rem;text-transform:uppercase;"
+            f"letter-spacing:0.1em;color:#9ca3af;padding:0 10px 5px 0;font-weight:600;"
+            f"border-bottom:1px solid #ede9fe;'>Column</th>"
+            f"<th style='text-align:left;font-size:0.65rem;text-transform:uppercase;"
+            f"letter-spacing:0.1em;color:#9ca3af;padding:0 0 5px;font-weight:600;"
+            f"border-bottom:1px solid #ede9fe;'>Type</th>"
+            f"</tr></thead>"
+            f"<tbody>{col_rows}</tbody>"
+            f"</table></div>"
+        )
+    return (
+        f"<div style='display:flex;gap:0.75rem;flex-wrap:wrap;padding:0.25rem 0 0.5rem;'>"
+        f"{panels}</div>"
+        f"<p style='margin:0.6rem 0 0;font-size:0.73rem;color:#9ca3af;"
+        f"font-family:Inter,sans-serif;'>"
+        f"Use these column names in your questions for more precise results."
+        f"</p>"
+    )
 
 
 def query_database(sql: str, role: Role, username: str) -> str:
