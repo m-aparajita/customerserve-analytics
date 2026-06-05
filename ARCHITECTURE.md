@@ -25,8 +25,8 @@ CustomerServe is a **natural-language analytics agent** for retail order data. A
 │  ┌────────────────────────────────────────────────────────┐    │
 │  │                   Gradio UI  (app.py)                  │    │
 │  │   Auth Login → Role Badge → Schema Accordion           │    │
-│  │   → Query Box → Templates → Chat Response → Chart      │    │
-│  │   → Download Chart (PNG via kaleido)                   │    │
+│  │   → Query Box → Templates → Chat Response              │    │
+│  │   → Chart → Key Insights → Download Chart (PNG)        │    │
 │  └───────────────────────────┬────────────────────────────┘    │
 │                              │                                  │
 │                    ┌─────────▼──────────┐                      │
@@ -43,20 +43,20 @@ CustomerServe is a **natural-language analytics agent** for retail order data. A
 │                              │                                  │
 │                    ┌─────────▼──────────┐                      │
 │                    │   QueryAgent       │                      │
-│                    │  (agentic loop,    │◀──▶ Groq API         │
-│                    │   max 8 rounds)    │     llama-4-scout    │
-│                    └──┬──────┬──────┬───┘                      │
-│                       │      │      │                           │
-│              ┌────────▼┐  ┌──▼───┐ ┌▼──────────┐             │
-│              │get_schema│  │query_│ │build_chart│             │
-│              │          │  │  db  │ │  (Plotly) │             │
-│              └──────────┘  └──┬───┘ └───────────┘             │
-│                               │                                 │
-│                    ┌──────────▼──────────┐                     │
-│                    │   SQL Guardrail     │  ← Layer 3          │
-│                    │  (SELECT-only,      │                     │
-│                    │   row limits, RBAC) │                     │
-│                    └──────────┬──────────┘                     │
+│                    │  get_schema +      │◀──▶ Groq API         │
+│                    │  query_database    │     llama-4-scout    │
+│                    └─────────┬──────────┘                      │
+│                         rows │                                  │
+│                    ┌─────────▼──────────┐                      │
+│                    │   ChartAgent       │                      │
+│                    │  build_chart +     │◀──▶ Groq API         │
+│                    │  key insights      │     llama-4-scout    │
+│                    └──┬─────────────────┘                      │
+│                       │                                         │
+│              ┌────────▼┐  ┌──────────┐                        │
+│              │get_schema│  │query_ db │                        │
+│              │          │  │(+Layer 3)│                        │
+│              └──────────┘  └──┬───────┘                        │
 │                               │                                 │
 │                    ┌──────────▼──────────┐                     │
 │                    │       DuckDB        │                     │
@@ -76,6 +76,7 @@ CustomerServe is a **natural-language analytics agent** for retail order data. A
 │  PRESENTATION       Gradio UI (app.py)   │
 │                     Single-column layout  │
 │                     Plotly charts        │
+│                     Key Insights box     │
 │                     Chart PNG export     │
 │                     (kaleido, scale=2)   │
 ├──────────────────────────────────────────┤
@@ -87,9 +88,16 @@ CustomerServe is a **natural-language analytics agent** for retail order data. A
 │  (Defence-in-depth) Layer 2 — prompt     │
 │                     Layer 3 — SQL        │
 ├──────────────────────────────────────────┤
-│  AGENT              agent/gemini_agent.py│
-│                     OpenAI tool loop     │
-│                     System prompt (RBAC) │
+│  QUERY AGENT        agent/gemini_agent.py│
+│                     Tools: get_schema,   │
+│                     query_database,      │
+│                     get_sample_data      │
+│                     Returns rows         │
+├──────────────────────────────────────────┤
+│  CHART AGENT        agent/chart_agent.py │
+│                     Tool: build_chart    │
+│                     Picks chart type     │
+│                     Returns insights     │
 ├──────────────────────────────────────────┤
 │  TOOLS (MCP-style)  get_schema           │
 │                     query_database       │
@@ -107,41 +115,42 @@ CustomerServe is a **natural-language analytics agent** for retail order data. A
 ## 4. User Query Flow — Sequence Diagram
 
 ```
-User     Gradio    Auth     Guardrail    Agent      Groq        DuckDB
- │          │        │          │           │          │            │
- │─ login ─▶│        │          │           │          │            │
- │          │─verify─▶          │           │          │            │
- │◀─ role ──│        │          │           │          │            │
- │          │        │          │           │          │            │
- │─ query ─▶│        │          │           │          │            │
- │          │──── get_role() ──▶│           │          │            │
- │          │        │ L1 check  │           │          │            │
- │          │        │ (topic,   │           │          │            │
- │          │        │  inject.) │           │          │            │
- │          │        │  PASS     │           │          │            │
- │          │        │──────────────────────▶│          │            │
- │          │        │           │  ROUND 1  │          │            │
- │          │        │           │  messages ─────────▶│            │
- │          │        │           │           │◀─ tool_call: get_schema
- │          │        │           │           │──────────────────────▶│
- │          │        │           │           │◀─────── schema ───────│
- │          │        │           │  ROUND 2  │          │            │
- │          │        │           │  (schema) ─────────▶│            │
- │          │        │           │           │◀─ tool_call: query_db │
- │          │        │           │  L3 SQL check        │            │
- │          │        │           │  (SELECT-only,       │            │
- │          │        │           │   row limit RBAC)    │            │
- │          │        │           │           │──────────────────────▶│
- │          │        │           │           │◀──────── rows ────────│
- │          │        │           │  ROUND 3  │          │            │
- │          │        │           │  (rows) ──────────▶  │            │
- │          │        │           │           │◀─ tool_call: build_chart
- │          │        │           │           │ render Plotly fig      │
- │          │        │           │  ROUND 4  │          │            │
- │          │        │           │  (chart done)────── ▶│            │
- │          │        │           │           │◀─ text answer          │
- │          │ (text + chart_json)│           │          │            │
- │◀─ response + chart ──────────────────────────────────            │
+User    Gradio   Auth   Guardrail  QueryAgent   Groq     DuckDB  ChartAgent  Groq
+ │         │       │        │           │          │         │        │         │
+ │─login──▶│       │        │           │          │         │        │         │
+ │         │─verify▶        │           │          │         │        │         │
+ │◀─role───│       │        │           │          │         │        │         │
+ │         │       │        │           │          │         │        │         │
+ │─query──▶│       │        │           │          │         │        │         │
+ │         │──get_role()────▶           │          │         │        │         │
+ │         │       │  L1 check          │          │         │        │         │
+ │         │       │  PASS              │          │         │        │         │
+ │         │       │────────────────────▶          │         │        │         │
+ │         │       │        │  ROUND 1  │          │         │        │         │
+ │         │       │        │  messages ──────────▶│         │        │         │
+ │         │       │        │           │◀─tool: get_schema  │        │         │
+ │         │       │        │           │─────────────────────▶       │         │
+ │         │       │        │           │◀──────── schema ────│        │         │
+ │         │       │        │  ROUND 2  │          │         │        │         │
+ │         │       │        │  (schema)───────────▶│         │        │         │
+ │         │       │        │           │◀─tool: query_db    │        │         │
+ │         │       │        │  L3 check │          │         │        │         │
+ │         │       │        │  PASS     │──────────────────────▶      │         │
+ │         │       │        │           │◀────────── rows ────│        │         │
+ │         │       │        │  ROUND 3  │          │         │        │         │
+ │         │       │        │  (rows) ──────────── ▶│         │        │         │
+ │         │       │        │           │◀─ text answer       │        │         │
+ │         │       │        │           │          │         │        │         │
+ │         │  ── rows passed to ChartAgent ──────────────────────────▶│         │
+ │         │       │        │           │          │         │  ROUND 1          │
+ │         │       │        │           │          │         │  (rows+question)──▶
+ │         │       │        │           │          │         │        │◀─tool: build_chart
+ │         │       │        │           │          │         │        │ render Plotly fig
+ │         │       │        │           │          │         │  ROUND 2          │
+ │         │       │        │           │          │         │  (chart done)─────▶
+ │         │       │        │           │          │         │        │◀─insights text
+ │         │       │        │           │          │         │        │         │
+ │◀─ text + chart + insights ─────────────────────────────────────────│         │
 ```
 
 ---
@@ -186,23 +195,51 @@ Credentials loaded from environment variables at startup — never hardcoded.
 
 ---
 
-## 7. Agentic Tool Loop
+## 7. Multi-Agent Design
 
-The agent does not call the LLM once — it runs a **multi-round loop** (max 8 rounds):
+The system uses two specialised agents that run sequentially per user turn.
+
+### QueryAgent (`agent/gemini_agent.py`)
+Owns data retrieval. Runs a tool loop (max 8 rounds):
 
 ```
-Round 1:  LLM receives user question → calls get_schema()   ← returns from cache (pre-warmed at startup)
-Round 2:  LLM receives schema       → calls query_database(sql)
-Round 3:  LLM receives rows         → calls build_chart(data)
-Round 4:  LLM receives chart status → writes final text answer
-          Loop exits (no tool calls in response)
+Round 1:  LLM receives user question → calls get_schema()   ← cache hit (pre-warmed at startup)
+Round 2:  LLM receives schema        → calls query_database(sql)
+Round 3:  LLM receives rows          → writes text answer
+          Loop exits → returns (text, rows)
 ```
 
-**Why this matters:** The model cannot write correct SQL without knowing the schema first. Forcing `get_schema` as the first tool call eliminates hallucinated column names — a common failure mode in text-to-SQL systems.
+**Why get_schema first:** The model cannot write correct SQL without knowing column names. This eliminates hallucinated columns — a common failure mode in text-to-SQL systems.
 
-**Schema caching:** `get_schema()` queries DuckDB once at startup and stores the result in a module-level variable (`_schema_cache`). Every subsequent call — whether from the agent loop or the UI accordion — returns the cached string instantly, with no DB round-trip. The cache is process-scoped; a Space restart refreshes it automatically.
+**Schema caching:** `get_schema()` queries DuckDB once at startup and stores the result in `_schema_cache`. Every subsequent call returns instantly with no DB round-trip.
 
-The tool loop is implemented using the **OpenAI function-calling format** (Groq is OpenAI-compatible), making the agent portable to GPT-4o, Claude, or any other OpenAI-compatible provider with zero code changes.
+### ChartAgent (`agent/chart_agent.py`)
+Owns visualisation and insight. Runs only when QueryAgent returns rows. Tool loop (max 3 rounds):
+
+```
+Round 1:  Receives rows + user question → decides chart type → calls build_chart()
+Round 2:  Receives chart confirmation   → writes 1–2 insight bullets
+          Loop exits → returns (chart_json, insights)
+```
+
+ChartAgent prompt rules for chart selection:
+- **line** — time-series or sequential data
+- **bar** — categorical comparisons
+- **pie** — part-of-whole with ≤ 6 categories
+- **scatter** — correlation between two numeric columns
+- **histogram** — distribution of a single numeric column
+
+### Why separate agents?
+| Concern | QueryAgent | ChartAgent |
+|---------|-----------|------------|
+| Tools | get_schema, query_database, get_sample_data | build_chart only |
+| Skill | SQL reasoning, schema navigation | Visual storytelling, pattern recognition |
+| Rounds | Up to 8 | Up to 3 |
+| Failure mode | Bad SQL → guardrail catches it | Bad chart choice → benign, still shows something |
+
+Each agent can be tuned, swapped, or scaled independently. In production, ChartAgent could use a smaller/cheaper model since chart selection is a simpler task than SQL generation.
+
+The tool loop uses the **OpenAI function-calling format** (Groq is OpenAI-compatible), making both agents portable to GPT-4o, Claude, or any other OpenAI-compatible provider with zero code changes.
 
 ---
 
@@ -352,13 +389,16 @@ These are gaps you should be ready to discuss in interviews:
 ## 13. Interview Talking Points
 
 **"Walk me through your architecture."**
-> Single-process Python app: Gradio handles UI and auth, an agentic loop talks to Groq's LLM, tools execute SQL on DuckDB, and results render as Plotly charts. Everything runs in one Docker container on HuggingFace Spaces free tier.
+> Single-process Python app with a two-agent pipeline. Gradio handles UI and auth. A QueryAgent talks to Groq to write SQL and retrieve data. The rows are then handed off to a ChartAgent, which independently decides the best visualisation and surfaces 1–2 key insights — trends, anomalies, standout figures. Everything runs in one Docker container on HuggingFace Spaces free tier.
+
+**"Why two agents instead of one?"**
+> QueryAgent and ChartAgent have genuinely different skills. QueryAgent needs to reason about schema, write correct SQL, and understand business intent. ChartAgent needs to understand visual storytelling — which chart type fits the data shape, and what pattern is worth surfacing. Separating them means each has a focused system prompt, a minimal tool set, and can be tuned or swapped independently. In production, ChartAgent could run on a smaller, cheaper model since chart selection is a simpler task than SQL generation.
 
 **"Why DuckDB instead of PostgreSQL?"**
 > DuckDB is an in-process analytical database — it runs inside the Python process with no server, no network, and no configuration. For read-heavy analytics workloads (GROUP BY, SUM, window functions), it outperforms SQLite significantly. It was the right choice for a single-container deployment where I couldn't run a separate database server.
 
 **"How does the agent know what SQL to write?"**
-> It doesn't hardcode any schema knowledge. Round 1 of the tool loop always calls `get_schema()` to discover the current tables and column names. This eliminates hallucinated column names and makes the system schema-agnostic — you can swap in a different database and it still works. The schema is also pre-warmed into a module-level cache at startup, so the agent's `get_schema` call is instant rather than a DB round-trip on every query. The same cache powers the Schema Reference accordion in the UI, which lets ADMIN and ANALYST users browse column names before they write a question.
+> It doesn't hardcode any schema knowledge. Round 1 of the QueryAgent loop always calls `get_schema()` to discover the current tables and column names. This eliminates hallucinated column names and makes the system schema-agnostic — you can swap in a different database and it still works. The schema is pre-warmed into a module-level cache at startup, so the `get_schema` call is instant. The same cache powers the Schema Reference accordion in the UI for ADMIN and ANALYST users.
 
 **"How do you prevent SQL injection or data leaks?"**
 > Three layers. Layer 1 filters the raw user input for prompt injection patterns. Layer 2 is the role-scoped system prompt — the model is instructed what it can and cannot do. Layer 3 validates the generated SQL before execution: only SELECT is allowed, dangerous clauses are stripped, and row limits are enforced per role. Even if the LLM were somehow manipulated, it cannot write a DELETE or expose another user's data.

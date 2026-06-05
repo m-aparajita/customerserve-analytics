@@ -1,6 +1,6 @@
 # CustomerServe Analytics Agent
 
-Natural-language analytics agent for retail order data. Users ask questions in plain English; the agent writes SQL, queries DuckDB, and renders Plotly charts in a Gradio UI.
+Natural-language analytics agent for retail order data. Users ask questions in plain English; a QueryAgent writes SQL and queries DuckDB, then a ChartAgent selects the best visualisation and surfaces key insights.
 
 **Two live environments:** `hf` = interview Space (stable), `hf-dev` = dev Space (experimental). Active branch: `dev`. Promote to `main` only when ready.
 
@@ -11,8 +11,9 @@ Natural-language analytics agent for retail order data. Users ask questions in p
 | Layer | File(s) | Notes |
 |-------|---------|-------|
 | UI | `app.py` | Gradio, single process, built-in auth, chart PNG download (kaleido) |
-| Agent | `agent/gemini_agent.py` | Groq + llama-4-scout, OpenAI-compatible tool loop |
-| Prompt | `agent/system_prompt.py` | Role-scoped, no schema embedded (model calls get_schema) |
+| QueryAgent | `agent/gemini_agent.py` | Groq + llama-4-scout; tools: `get_schema`, `query_database`, `get_sample_data`; returns rows to ChartAgent |
+| ChartAgent | `agent/chart_agent.py` | Groq + llama-4-scout; tool: `build_chart` only; picks chart type + returns 1–2 insight bullets |
+| Prompt | `agent/system_prompt.py` | Role-scoped (QueryAgent only); ChartAgent has its own inline prompt |
 | Tools | `mcp/tools.py` | `get_schema`, `query_database`, `get_sample_data`, `build_chart` |
 | DB | `database/` | In-process DuckDB; CSVs downloaded from HF Dataset on first run |
 | Auth | `auth/` | ADMIN / ANALYST / VIEWER roles from env vars |
