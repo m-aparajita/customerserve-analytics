@@ -304,8 +304,10 @@ def respond(message: str, history: list, request: gr.Request):
                 tmp = tempfile.NamedTemporaryFile(suffix=".png", delete=False, prefix="chart_")
                 export_fig = pio.from_json(fig.to_json())
                 export_fig.update_layout(
-                    font=dict(family="Arial, sans-serif"),
-                    title=dict(font=dict(family="Arial, sans-serif")),
+                    paper_bgcolor="#ffffff",
+                    plot_bgcolor="#f5f3ff",
+                    font=dict(family="Arial, sans-serif", color="#1e1b4b"),
+                    title=dict(font=dict(family="Arial, sans-serif", color="#3b0764")),
                 )
                 export_fig.write_image(tmp.name, width=1000, height=520, scale=2)
                 chart_download = gr.update(value=tmp.name, visible=True)
