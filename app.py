@@ -303,12 +303,20 @@ def respond(message: str, history: list, request: gr.Request):
             try:
                 tmp = tempfile.NamedTemporaryFile(suffix=".png", delete=False, prefix="chart_")
                 export_fig = pio.from_json(fig.to_json())
+                _arial_dark  = dict(family="Arial, sans-serif", color="#1e1b4b")
+                _arial_title = dict(family="Arial, sans-serif", color="#3b0764")
+                _arial_axis  = dict(family="Arial, sans-serif", color="#374151")
                 export_fig.update_layout(
                     paper_bgcolor="#ffffff",
                     plot_bgcolor="#f5f3ff",
-                    font=dict(family="Arial, sans-serif", color="#1e1b4b"),
-                    title=dict(font=dict(family="Arial, sans-serif", color="#3b0764")),
+                    font=_arial_dark,
+                    title=dict(font=_arial_title),
+                    xaxis=dict(tickfont=_arial_axis),
+                    yaxis=dict(tickfont=_arial_axis),
+                    legend=dict(font=_arial_dark),
                 )
+                # pie slice labels use a trace-level textfont (near-white in interactive view)
+                export_fig.update_traces(textfont=_arial_dark)
                 export_fig.write_image(tmp.name, width=1000, height=520, scale=2)
                 chart_download = gr.update(value=tmp.name, visible=True)
             except Exception:
