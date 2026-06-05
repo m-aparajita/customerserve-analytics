@@ -35,8 +35,7 @@ Step 1 — choose the best chart type:
   If the data is a single scalar value or clearly unsuitable for a chart, skip build_chart.
 
 Step 2 — call build_chart with chart_type, x_col, y_col, and a concise descriptive title.
-  IMPORTANT: pass ALL rows exactly as received — do not filter, sort, or omit any rows,
-  including rows where a value is 'unknown', 'null', 'N/A', or empty. Every category must appear.
+  You only need to specify the parameters — the data will be supplied automatically.
 
 Step 3 — after the chart is built (or if you skipped it), respond with exactly 1–2 bullet points using the • character.
 Each bullet must highlight one notable trend, anomaly, or standout figure from the data.
@@ -119,6 +118,9 @@ class ChartAgent:
             for call in msg.tool_calls:
                 fn_name = call.function.name
                 fn_args = json.loads(call.function.arguments)
+                if fn_name == "build_chart":
+                    # Always use the original rows — never the LLM's possibly-filtered version
+                    fn_args["data"] = rows
                 result_str = dispatch(fn_name, fn_args, role, "chart_agent")
 
                 if fn_name == "build_chart":
