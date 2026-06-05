@@ -10,7 +10,7 @@ Natural-language analytics agent for retail order data. Users ask questions in p
 
 | Layer | File(s) | Notes |
 |-------|---------|-------|
-| UI | `app.py` | Gradio, single process, built-in auth |
+| UI | `app.py` | Gradio, single process, built-in auth, chart PNG download (kaleido) |
 | Agent | `agent/gemini_agent.py` | Groq + llama-4-scout, OpenAI-compatible tool loop |
 | Prompt | `agent/system_prompt.py` | Role-scoped, no schema embedded (model calls get_schema) |
 | Tools | `mcp/tools.py` | `get_schema`, `query_database`, `get_sample_data`, `build_chart` |

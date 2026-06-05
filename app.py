@@ -5,6 +5,7 @@ Light theme with violet/cyan accent — works reliably with Gradio's default ren
 """
 
 import os
+import tempfile
 import gradio as gr
 import plotly.io as pio
 from dotenv import load_dotenv
@@ -14,6 +15,7 @@ load_dotenv()
 from database.setup import setup_database
 from mcp.tools import get_schema, get_schema_html
 from agent.gemini_agent import get_agent
+from agent.chart_agent import get_chart_agent
 from auth.manager import get_role, gradio_auth_pairs
 from auth.roles import VIEWER_TEMPLATES, Role, PERMISSIONS
 
@@ -237,37 +239,87 @@ _DIVIDER = (
 )
 
 
+# ── Helpers ───────────────────────────────────────────────────────────────────
+
+def _format_insights(insights: str) -> str:
+    lines = [l.strip() for l in insights.strip().splitlines() if l.strip()]
+    items = "".join(
+        f"<li style='margin-bottom:0.35rem;'>{l.lstrip('•- ')}</li>"
+        for l in lines
+    )
+    return (
+        "<div style='background:#f0fdf4;border:1px solid #86efac;"
+        "border-radius:0.65rem;padding:0.75rem 1rem;margin-top:0.25rem;'>"
+        "<p style='font-size:0.72rem;font-weight:600;text-transform:uppercase;"
+        "letter-spacing:0.13em;color:#15803d;margin:0 0 0.45rem;"
+        "font-family:Inter,sans-serif;'>Key Insights</p>"
+        "<ul style='margin:0;padding-left:1.2rem;color:#1e1b4b;"
+        "font-family:Inter,sans-serif;font-size:0.88rem;line-height:1.7;'>"
+        f"{items}</ul></div>"
+    )
+
+
 # ── Handlers ──────────────────────────────────────────────────────────────────
 
 def respond(message: str, history: list, request: gr.Request):
-    username = request.username
-    role     = get_role(username)
-    agent    = get_agent()
+    username    = request.username
+    role        = get_role(username)
+    query_agent = get_agent()
+    chart_agent = get_chart_agent()
 
     history_tuples = []
     for i in range(0, len(history) - 1, 2):
         if i + 1 < len(history):
             history_tuples.append((history[i]["content"], history[i + 1]["content"]))
 
-    text, chart_json = agent.chat(
+    # ── Stage 1: QueryAgent — schema + SQL + data retrieval ──────────────
+    text, query_result = query_agent.chat(
         user_query=message,
         history=history_tuples,
         role=role,
         username=username,
     )
 
-    fig = None
-    if chart_json:
-        try:
-            fig = pio.from_json(chart_json)
-        except Exception as e:
-            text += f"\n\n*(Chart could not be rendered: {e})*"
+    # ── Stage 2: ChartAgent — visualisation + insights ───────────────────
+    fig              = None
+    insights_update  = gr.update(visible=False)
+    chart_download   = gr.update(visible=False)
+
+    if query_result and query_result.get("rows"):
+        chart_json, insights = chart_agent.analyze(
+            rows=query_result["rows"],
+            columns=query_result["columns"],
+            user_question=message,
+            role=role,
+        )
+
+        if chart_json:
+            try:
+                fig = pio.from_json(chart_json)
+            except Exception as e:
+                text += f"\n\n*(Chart could not be rendered: {e})*"
+
+        if fig is not None:
+            try:
+                tmp = tempfile.NamedTemporaryFile(suffix=".png", delete=False, prefix="chart_")
+                export_fig = pio.from_json(fig.to_json())
+                export_fig.update_layout(
+                    font=dict(family="Arial, sans-serif"),
+                    title=dict(font=dict(family="Arial, sans-serif")),
+                )
+                export_fig.write_image(tmp.name, width=1000, height=520, scale=2)
+                chart_download = gr.update(value=tmp.name, visible=True)
+            except Exception:
+                pass
+
+        if insights:
+            insights_update = gr.update(value=_format_insights(insights), visible=True)
 
     history = history + [
         {"role": "user",      "content": message},
         {"role": "assistant", "content": text},
     ]
-    return "", history, fig
+    return "", history, fig, chart_download, insights_update
 
 
 def fill_input(template: str) -> str:
@@ -349,16 +401,26 @@ def build_ui():
         # 7 ── Visualisation
         chart_output = gr.Plot(show_label=False)
 
+        # 8 ── Download chart button (hidden until a chart is rendered)
+        download_btn = gr.DownloadButton(
+            label="Download Chart",
+            visible=False,
+            size="sm",
+        )
+
+        # 9 ── Key Insights (hidden until ChartAgent returns analysis)
+        insights_box = gr.HTML(value="", visible=False)
+
         # ── Events ───────────────────────────────────────────────────────
         send_btn.click(
             fn=respond,
             inputs=[msg_box, chatbot],
-            outputs=[msg_box, chatbot, chart_output],
+            outputs=[msg_box, chatbot, chart_output, download_btn, insights_box],
         )
         msg_box.submit(
             fn=respond,
             inputs=[msg_box, chatbot],
-            outputs=[msg_box, chatbot, chart_output],
+            outputs=[msg_box, chatbot, chart_output, download_btn, insights_box],
         )
         for btn, tpl in tpl_btns:
             btn.click(fn=fill_input, inputs=gr.State(tpl), outputs=msg_box)

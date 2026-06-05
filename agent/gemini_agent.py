@@ -1,12 +1,13 @@
 """
-Groq LLaMA agent with OpenAI-compatible function calling.
+QueryAgent — Groq LLaMA agent with OpenAI-compatible function calling.
 
 Flow per user turn:
   1. Input guardrail (Layer 1)
   2. Build role-scoped system prompt
-  3. Send to Groq with tool declarations
+  3. Send to Groq with tool declarations (get_schema, query_database, get_sample_data)
   4. Loop: dispatch function calls → feed results back → repeat until text answer
-  5. Return (text_answer, chart_json | None)
+  5. Return (text_answer, query_result | None)
+     query_result is passed to ChartAgent for visualisation + insights.
 """
 
 import json
@@ -27,7 +28,7 @@ _MODEL_NAME = "meta-llama/llama-4-scout-17b-16e-instruct"
 _MAX_TOOL_ROUNDS = 8
 _HISTORY_TURNS = 6
 
-# Convert MCP-style declarations to OpenAI/Groq tool format
+# QueryAgent only handles schema + data retrieval; build_chart is owned by ChartAgent
 _TOOLS = [
     {
         "type": "function",
@@ -38,6 +39,7 @@ _TOOLS = [
         },
     }
     for t in TOOL_DECLARATIONS
+    if t["name"] != "build_chart"
 ]
 
 
@@ -53,8 +55,12 @@ class QueryAgent:
         history: list[tuple[str, str]],
         role: Role,
         username: str,
-    ) -> tuple[str, str | None]:
-        """Return (text_response, chart_json_or_None)."""
+    ) -> tuple[str, dict | None]:
+        """Return (text_response, query_result_or_None).
+
+        query_result is the parsed JSON from the last query_database call,
+        containing 'rows', 'columns', and 'row_count'. Passed to ChartAgent.
+        """
 
         # Layer 1 — input guardrail
         allowed, reason = input_check(user_query)
@@ -90,7 +96,7 @@ class QueryAgent:
 
         log_query(username=username, role=role, user_query=user_query, status="processing")
 
-        chart_json: str | None = None
+        last_query_result: dict | None = None
         final_text = "I was unable to generate a response."
         last_msg = None
 
@@ -105,7 +111,6 @@ class QueryAgent:
             )
             last_msg = response.choices[0].message
 
-            # Append assistant's response to the conversation
             asst_entry: dict = {
                 "role": "assistant",
                 "content": last_msg.content or "",
@@ -128,17 +133,16 @@ class QueryAgent:
                 final_text = last_msg.content or final_text
                 break
 
-            # Dispatch each tool call and append results
             for call in last_msg.tool_calls:
                 fn_name = call.function.name
                 fn_args = json.loads(call.function.arguments)
 
                 result_str = dispatch(fn_name, fn_args, role, username)
 
-                if fn_name == "build_chart":
+                if fn_name == "query_database":
                     parsed = json.loads(result_str)
-                    if "chart_json" in parsed:
-                        chart_json = parsed["chart_json"]
+                    if "rows" in parsed:
+                        last_query_result = parsed
 
                 messages.append({
                     "role": "tool",
@@ -146,11 +150,9 @@ class QueryAgent:
                     "content": result_str,
                 })
 
-        log_query(username=username, role=role, user_query=user_query,
-                  chart_type=json.loads(chart_json).get("chart_type") if chart_json else None,
-                  status="success")
+        log_query(username=username, role=role, user_query=user_query, status="success")
 
-        return final_text, chart_json
+        return final_text, last_query_result
 
 # Singleton — one agent instance shared across all requests.
 _agent: QueryAgent | None = None

@@ -11,3 +11,4 @@ sqlglot==26.17.0
 python-multipart==0.0.20
 httpx==0.28.1
 huggingface_hub==0.30.2
+kaleido==0.2.1

@@ -24,8 +24,9 @@ CustomerServe is a **natural-language analytics agent** for retail order data. A
 │      ▼                                                          │
 │  ┌────────────────────────────────────────────────────────┐    │
 │  │                   Gradio UI  (app.py)                  │    │
-│  │   Auth Login → Role Badge → Query Box → Templates      │    │
-│  │               → Chat Response → Plotly Chart           │    │
+│  │   Auth Login → Role Badge → Schema Accordion           │    │
+│  │   → Query Box → Templates → Chat Response → Chart      │    │
+│  │   → Download Chart (PNG via kaleido)                   │    │
 │  └───────────────────────────┬────────────────────────────┘    │
 │                              │                                  │
 │                    ┌─────────▼──────────┐                      │
@@ -75,6 +76,8 @@ CustomerServe is a **natural-language analytics agent** for retail order data. A
 │  PRESENTATION       Gradio UI (app.py)   │
 │                     Single-column layout  │
 │                     Plotly charts        │
+│                     Chart PNG export     │
+│                     (kaleido, scale=2)   │
 ├──────────────────────────────────────────┤
 │  AUTH & RBAC        auth/manager.py      │
 │                     auth/roles.py        │
@@ -173,11 +176,11 @@ User     Gradio    Auth     Guardrail    Agent      Groq        DuckDB
 
 ## 6. RBAC Model
 
-| Role | Free-form Query | Raw Row Access | Row Limit | Allowed Charts | Can Query query_logs |
-|------|:--------------:|:--------------:|:---------:|:--------------:|:--------------------:|
-| ADMIN | ✅ | ✅ | 10,000 | All | ✅ |
-| ANALYST | ✅ | ❌ (aggregates only) | 1,000 | All | ❌ |
-| VIEWER | ❌ (templates only) | ❌ | 100 | Limited | ❌ |
+| Role | Free-form Query | Raw Row Access | Row Limit | Allowed Charts | Schema Accordion | Can Query query_logs |
+|------|:--------------:|:--------------:|:---------:|:--------------:|:----------------:|:--------------------:|
+| ADMIN | ✅ | ✅ | 10,000 | All | ✅ | ✅ |
+| ANALYST | ✅ | ❌ (aggregates only) | 1,000 | All | ✅ | ❌ |
+| VIEWER | ❌ (templates only) | ❌ | 100 | Limited | ❌ | ❌ |
 
 Credentials loaded from environment variables at startup — never hardcoded.
 
@@ -188,7 +191,7 @@ Credentials loaded from environment variables at startup — never hardcoded.
 The agent does not call the LLM once — it runs a **multi-round loop** (max 8 rounds):
 
 ```
-Round 1:  LLM receives user question → calls get_schema()
+Round 1:  LLM receives user question → calls get_schema()   ← returns from cache (pre-warmed at startup)
 Round 2:  LLM receives schema       → calls query_database(sql)
 Round 3:  LLM receives rows         → calls build_chart(data)
 Round 4:  LLM receives chart status → writes final text answer
@@ -196,6 +199,8 @@ Round 4:  LLM receives chart status → writes final text answer
 ```
 
 **Why this matters:** The model cannot write correct SQL without knowing the schema first. Forcing `get_schema` as the first tool call eliminates hallucinated column names — a common failure mode in text-to-SQL systems.
+
+**Schema caching:** `get_schema()` queries DuckDB once at startup and stores the result in a module-level variable (`_schema_cache`). Every subsequent call — whether from the agent loop or the UI accordion — returns the cached string instantly, with no DB round-trip. The cache is process-scoped; a Space restart refreshes it automatically.
 
 The tool loop is implemented using the **OpenAI function-calling format** (Groq is OpenAI-compatible), making the agent portable to GPT-4o, Claude, or any other OpenAI-compatible provider with zero code changes.
 
@@ -275,6 +280,9 @@ database/setup.py runs
         │   YES ──┘
         │
         ▼
+get_schema() called → result stored in _schema_cache
+        │
+        ▼
 Gradio UI starts (app.py)
         │
         ▼
@@ -313,7 +321,7 @@ Tag v1.0 = last known-good interview version (rollback point)
 |---------|-------------|
 | Real-time / live data | Uses a static retail dataset; no database write path |
 | Scheduled email reports | Designed in Lovable prototype; not wired into this system |
-| Data export (CSV / PDF) | Not implemented |
+| Data export (CSV / PDF) | Chart PNG download is implemented; CSV/PDF export is not |
 | Conversation persistence | Chat history resets on page refresh (Gradio session-scoped) |
 | Multi-language support | English only |
 | Mobile-optimised UI | Gradio is desktop-first |
@@ -350,7 +358,7 @@ These are gaps you should be ready to discuss in interviews:
 > DuckDB is an in-process analytical database — it runs inside the Python process with no server, no network, and no configuration. For read-heavy analytics workloads (GROUP BY, SUM, window functions), it outperforms SQLite significantly. It was the right choice for a single-container deployment where I couldn't run a separate database server.
 
 **"How does the agent know what SQL to write?"**
-> It doesn't hardcode any schema knowledge. Round 1 of the tool loop always calls `get_schema()` to discover the current tables and column names. This eliminates hallucinated column names and makes the system schema-agnostic — you can swap in a different database and it still works.
+> It doesn't hardcode any schema knowledge. Round 1 of the tool loop always calls `get_schema()` to discover the current tables and column names. This eliminates hallucinated column names and makes the system schema-agnostic — you can swap in a different database and it still works. The schema is also pre-warmed into a module-level cache at startup, so the agent's `get_schema` call is instant rather than a DB round-trip on every query. The same cache powers the Schema Reference accordion in the UI, which lets ADMIN and ANALYST users browse column names before they write a question.
 
 **"How do you prevent SQL injection or data leaks?"**
 > Three layers. Layer 1 filters the raw user input for prompt injection patterns. Layer 2 is the role-scoped system prompt — the model is instructed what it can and cannot do. Layer 3 validates the generated SQL before execution: only SELECT is allowed, dangerous clauses are stripped, and row limits are enforced per role. Even if the LLM were somehow manipulated, it cannot write a DELETE or expose another user's data.
