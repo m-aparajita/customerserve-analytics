@@ -6,10 +6,10 @@
 
 ## 1. What It Does
 
-CustomerServe is a **natural-language analytics agent** for retail order data. A user types a question in plain English; the system automatically writes SQL, queries a database, and renders an interactive chart — no coding required.
+Order Insights is a **natural-language analytics agent** for retail order data. A user types a question in plain English; the system automatically writes SQL, queries a database, renders an interactive chart, and surfaces key insights — no coding required. Users can then email the report to themselves instantly or schedule recurring deliveries (weekly, bi-weekly, monthly).
 
 **Core user journey:**
-> *"Show me monthly revenue for 2024"* → SQL generated → DuckDB queried → Plotly bar chart rendered + text summary
+> *"Show me monthly revenue for 2024"* → SQL generated → DuckDB queried → Plotly bar chart rendered + text summary → optionally emailed or scheduled
 
 ---
 
@@ -27,6 +27,7 @@ CustomerServe is a **natural-language analytics agent** for retail order data. A
 │  │   Auth Login → Role Badge → Schema Accordion           │    │
 │  │   → Query Box → Templates → Chat Response              │    │
 │  │   → Chart → Key Insights → Download Chart (PNG)        │    │
+│   → Schedule Report (email now / recurring)            │    │
 │  └───────────────────────────┬────────────────────────────┘    │
 │                              │                                  │
 │                    ┌─────────▼──────────┐                      │
@@ -62,7 +63,15 @@ CustomerServe is a **natural-language analytics agent** for retail order data. A
 │                    │       DuckDB        │                     │
 │                    │  orders / products  │                     │
 │                    │  order_items /      │                     │
-│                    │  query_logs         │                     │
+│                    │  query_logs /       │                     │
+│                    │  scheduled_reports  │                     │
+│                    └─────────────────────┘                     │
+│                                                                 │
+│                    ┌─────────────────────┐                     │
+│                    │   Mailer            │──▶ Resend API        │
+│                    │  mailer/sender.py   │    (email + chart    │
+│                    │  database/          │     PNG attachment)  │
+│                    │  scheduler.py       │                     │
 │                    └─────────────────────┘                     │
 └─────────────────────────────────────────────────────────────────┘
 ```
@@ -96,6 +105,8 @@ CustomerServe is a **natural-language analytics agent** for retail order data. A
 ├──────────────────────────────────────────┤
 │  CHART AGENT        agent/chart_agent.py │
 │                     Tool: build_chart    │
+│                     (data injected by    │
+│                      agent, not LLM)     │
 │                     Picks chart type     │
 │                     Returns insights     │
 ├──────────────────────────────────────────┤
@@ -103,10 +114,19 @@ CustomerServe is a **natural-language analytics agent** for retail order data. A
 │                     query_database       │
 │                     get_sample_data      │
 │                     build_chart          │
+│                     (axis labels auto-   │
+│                      formatted)          │
+├──────────────────────────────────────────┤
+│  EMAIL / SCHEDULER  mailer/sender.py     │
+│                     database/scheduler   │
+│                     Resend API (v1.x)    │
+│                     scheduled_reports    │
+│                     table in DuckDB      │
 ├──────────────────────────────────────────┤
 │  DATA               DuckDB (in-process)  │
 │                     CSV → HF Dataset     │
 │                     query_logs table     │
+│                     scheduled_reports    │
 └──────────────────────────────────────────┘
 ```
 
@@ -229,6 +249,8 @@ ChartAgent prompt rules for chart selection:
 - **scatter** — correlation between two numeric columns
 - **histogram** — distribution of a single numeric column
 
+**Key implementation detail — `data` not in tool schema:** The ChartAgent's `build_chart` schema deliberately omits the `data` parameter. The agent injects `fn_args["data"] = rows` before calling dispatch. This avoids a Groq validation error where the LLM would JSON-stringify the array into a string, which fails schema validation (`expected array, got string`). The LLM only specifies `chart_type`, `x_col`, `y_col`, and `title`.
+
 ### Why separate agents?
 | Concern | QueryAgent | ChartAgent |
 |---------|-----------|------------|
@@ -299,7 +321,88 @@ The tool loop uses the **OpenAI function-calling format** (Groq is OpenAI-compat
 
 ---
 
-## 9. Data Flow — Startup
+## 9. Database Tables
+
+All tables live in a single DuckDB file (`customerserve.duckdb`).
+
+---
+
+### `orders` — one row per customer order
+| Column | Type | Description |
+|--------|------|-------------|
+| `order_id` | VARCHAR | Unique order identifier (e.g. `Byk-0`) |
+| `customer_id` | INTEGER | Customer identifier |
+| `order_date` | DATE | Date the order was placed |
+| `order_ts` | TIMESTAMP | Full timestamp of the order |
+| `city` | VARCHAR | City where the order was placed |
+| `state` | VARCHAR | State code (e.g. `DL`, `MH`) |
+| `payment_method` | VARCHAR | e.g. `Wallet`, `Card`, `COD` |
+| `order_status` | VARCHAR | e.g. `Delivered`, `Cancelled`, `Returned` |
+| `total_amount` | DOUBLE | Total order value in INR |
+
+---
+
+### `order_items` — one row per product line within an order
+| Column | Type | Description |
+|--------|------|-------------|
+| `order_id` | VARCHAR | Foreign key → `orders.order_id` |
+| `product_id` | INTEGER | Foreign key → `products.product_id` |
+| `quantity` | INTEGER | Number of units ordered |
+| `unit_price` | DOUBLE | Price per unit at time of order |
+| `discount` | DOUBLE | Discount applied (INR) |
+| `net_amount` | DOUBLE | Final line amount after discount |
+
+---
+
+### `products` — product catalogue
+| Column | Type | Description |
+|--------|------|-------------|
+| `product_id` | INTEGER | Unique product identifier |
+| `brand` | VARCHAR | Brand name (e.g. `Himalaya`, `Maybelline`) |
+| `category` | VARCHAR | Top-level category (e.g. `Fragrance`, `Skincare`) |
+| `sub_category` | VARCHAR | Sub-category (e.g. `Compact`, `Serum`) |
+| `mrp` | DOUBLE | Maximum retail price in INR |
+
+---
+
+### `query_logs` — audit trail of every agent query
+| Column | Type | Description |
+|--------|------|-------------|
+| `log_id` | VARCHAR | UUID primary key |
+| `ts` | TIMESTAMP | When the query was executed |
+| `username` | VARCHAR | Logged-in user |
+| `role` | VARCHAR | `admin`, `analyst`, or `viewer` |
+| `user_query` | TEXT | The original plain-English question |
+| `generated_sql` | TEXT | SQL produced by the QueryAgent |
+| `exec_ms` | INTEGER | DuckDB execution time in milliseconds |
+| `rows_returned` | INTEGER | Number of rows the query returned |
+| `chart_type` | VARCHAR | Chart type selected by ChartAgent (if any) |
+| `status` | VARCHAR | `success`, `blocked`, or `error` |
+| `guardrail_layer` | VARCHAR | Which guardrail blocked the query (if blocked) |
+| `guardrail_reason` | TEXT | Human-readable reason for the block |
+| `error_message` | TEXT | Exception message (if status = `error`) |
+
+---
+
+### `scheduled_reports` — user-created report schedules
+| Column | Type | Description |
+|--------|------|-------------|
+| `id` | VARCHAR | UUID primary key |
+| `username` | VARCHAR | User who created the schedule |
+| `email` | VARCHAR | Recipient email address |
+| `question` | TEXT | Original question — re-run each delivery for fresh data |
+| `frequency` | VARCHAR | `weekly`, `biweekly`, or `monthly` |
+| `days_of_week` | VARCHAR | JSON array of days e.g. `["Mon","Wed"]` (weekly/biweekly only) |
+| `start_date` | DATE | Date the schedule becomes active |
+| `end_date` | DATE | Date the schedule expires (NULL = indefinite) |
+| `next_send_date` | DATE | Next date a delivery is due |
+| `created_at` | TIMESTAMP | When the schedule was saved |
+| `last_sent_at` | TIMESTAMP | When the last email was successfully sent (NULL if never) |
+| `active` | BOOLEAN | `TRUE` = active, `FALSE` = cancelled |
+
+---
+
+## 10. Data Flow — Startup
 
 ```
 Docker container starts
@@ -331,7 +434,7 @@ Ready to serve requests
 
 ---
 
-## 10. Deployment Architecture
+## 11. Deployment Architecture
 
 ```
 GitHub (origin)
@@ -352,12 +455,11 @@ Tag v1.0 = last known-good interview version (rollback point)
 
 ---
 
-## 11. What Is Out of Scope
+## 12. What Is Out of Scope
 
 | Feature | Why excluded |
 |---------|-------------|
 | Real-time / live data | Uses a static retail dataset; no database write path |
-| Scheduled email reports | Designed in Lovable prototype; not wired into this system |
 | Data export (CSV / PDF) | Chart PNG download is implemented; CSV/PDF export is not |
 | Conversation persistence | Chat history resets on page refresh (Gradio session-scoped) |
 | Multi-language support | English only |
@@ -367,7 +469,7 @@ Tag v1.0 = last known-good interview version (rollback point)
 
 ---
 
-## 12. Known Limitations & Critical Missing Items
+## 13. Known Limitations & Critical Missing Items
 
 These are gaps you should be ready to discuss in interviews:
 
@@ -386,7 +488,7 @@ These are gaps you should be ready to discuss in interviews:
 
 ---
 
-## 13. Interview Talking Points
+## 14. Interview Talking Points
 
 **"Walk me through your architecture."**
 > Single-process Python app with a two-agent pipeline. Gradio handles UI and auth. A QueryAgent talks to Groq to write SQL and retrieve data. The rows are then handed off to a ChartAgent, which independently decides the best visualisation and surfaces 1–2 key insights — trends, anomalies, standout figures. Everything runs in one Docker container on HuggingFace Spaces free tier.
@@ -405,6 +507,9 @@ These are gaps you should be ready to discuss in interviews:
 
 **"What would you do differently in production?"**
 > Three things immediately: streaming responses (users shouldn't wait 15 seconds), a proper auth layer with JWT instead of Gradio's basic auth, and rate limiting per user so the Groq free tier isn't exhausted. After that, a test suite for the guardrails — those are security-critical and currently untested.
+
+**"How does the report scheduling work?"**
+> After any chart is rendered, a schedule panel appears. Users can send the report immediately or set up weekly, bi-weekly, or monthly recurring deliveries with a start/end date. Schedules are stored in a `scheduled_reports` DuckDB table. On each page load, a background thread checks for overdue schedules and re-runs the original query to generate fresh data before emailing the chart via Resend. It's best-effort on HuggingFace free tier — it fires when the app is active — which is appropriate for a portfolio demo but would need a dedicated scheduler in production.
 
 **"Why two HuggingFace Spaces?"**
 > Staging vs production. The `main` branch deploys to the stable interview Space which I never touch mid-demo. The `dev` branch deploys to a private dev Space where I iterate freely. When a change is validated on dev, I merge to main and promote it. The `v1.0` git tag gives me a rollback point if something goes badly wrong.
