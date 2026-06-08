@@ -12,4 +12,4 @@ python-multipart==0.0.20
 httpx==0.28.1
 huggingface_hub==0.30.2
 kaleido==0.2.1
-resend>=2.0.0
+resend>=0.5.0,<2.0.0
