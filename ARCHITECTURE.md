@@ -1,4 +1,4 @@
-# CustomerServe Analytics — Architecture & Design Document
+# Order Insights — Architecture & Design Document
 
 > **Purpose:** Interview preparation reference covering system design, technology choices, trade-offs, and known gaps.
 

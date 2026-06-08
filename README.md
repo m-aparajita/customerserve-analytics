@@ -1,5 +1,5 @@
 ---
-title: CustomerServe Analytics Agent
+title: Order Insights
 emoji: 📊
 colorFrom: blue
 colorTo: indigo
@@ -8,7 +8,7 @@ app_port: 7860
 pinned: false
 ---
 
-# CustomerServe Analytics Agent
+# Order Insights
 
 A natural-language data analytics agent for retail order/product data.
 Type a question in plain English → the agent writes SQL, queries the database, and renders an interactive chart.

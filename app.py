@@ -208,7 +208,7 @@ def _heading_html(username: str = "", role_label: str = "") -> str:
                line-height:1.15;
                margin:0 0 0.55rem;
                color:#3b0764;">
-      CustomerServe Analytics
+      Order Insights
     </h1>
     <p style="font-size:0.92rem;
               color:#374151;
@@ -356,7 +356,7 @@ def build_heading(request: gr.Request) -> str:
 
 def build_ui():
     with gr.Blocks(
-        title="CustomerServe Analytics",
+        title="Order Insights",
         theme=gr.themes.Soft(
             primary_hue="violet",
             secondary_hue="cyan",
@@ -447,7 +447,7 @@ if __name__ == "__main__":
     demo = build_ui()
     demo.launch(
         auth=gradio_auth_pairs(),
-        auth_message="Welcome to CustomerServe Analytics. Please log in.",
+        auth_message="Welcome to Order Insights. Please log in.",
         server_name="0.0.0.0",
         server_port=int(os.getenv("PORT", 7860)),
         show_error=True,
