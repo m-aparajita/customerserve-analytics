@@ -57,6 +57,23 @@ def setup_database(force_reload: bool = False) -> None:
                 print(f"  {table}: {count:,} rows loaded")
 
         conn.execute("""
+            CREATE TABLE IF NOT EXISTS scheduled_reports (
+                id             VARCHAR PRIMARY KEY,
+                username       VARCHAR,
+                email          VARCHAR,
+                question       TEXT,
+                frequency      VARCHAR,
+                days_of_week   VARCHAR,
+                start_date     DATE,
+                end_date       DATE,
+                next_send_date DATE,
+                created_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                last_sent_at   TIMESTAMP,
+                active         BOOLEAN DEFAULT TRUE
+            )
+        """)
+
+        conn.execute("""
             CREATE TABLE IF NOT EXISTS query_logs (
                 log_id        VARCHAR PRIMARY KEY,
                 ts            TIMESTAMP DEFAULT CURRENT_TIMESTAMP,

@@ -6,6 +6,8 @@ Light theme with violet/cyan accent — works reliably with Gradio's default ren
 
 import os
 import tempfile
+import threading
+from datetime import date as _date
 import gradio as gr
 import plotly.io as pio
 from dotenv import load_dotenv
@@ -13,11 +15,13 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from database.setup import setup_database
+from database.scheduler import save_schedule, get_due_schedules, mark_sent
 from mcp.tools import get_schema, get_schema_html
 from agent.gemini_agent import get_agent
 from agent.chart_agent import get_chart_agent
 from auth.manager import get_role, gradio_auth_pairs
 from auth.roles import VIEWER_TEMPLATES, Role, PERMISSIONS
+from mailer.sender import send_report_email
 
 print("Initialising database …")
 setup_database()
@@ -178,6 +182,21 @@ button:not(.primary):hover {
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: rgba(124,58,237,0.25); border-radius: 4px; }
 ::-webkit-scrollbar-thumb:hover { background: rgba(124,58,237,0.50); }
+
+/* ── Schedule panel ── */
+.schedule-panel > .label-wrap > span {
+    font-size: 0.72rem !important;
+    font-weight: 600 !important;
+    text-transform: uppercase !important;
+    letter-spacing: 0.13em !important;
+    color: #5b21b6 !important;
+}
+.schedule-panel {
+    background: #faf9ff !important;
+    border: 1px solid #ede9fe !important;
+    border-radius: 0.75rem !important;
+    margin-top: 0.75rem !important;
+}
 """
 
 
@@ -238,8 +257,71 @@ _DIVIDER = (
     "margin:1.5rem 0;'>"
 )
 
+_SCHEDULE_INTRO = (
+    "<p style='font-size:0.85rem;color:#374151;font-family:Inter,sans-serif;"
+    "margin:0 0 0.75rem;line-height:1.6;'>"
+    "Email this chart and its insights — once now, or on a recurring schedule.</p>"
+)
+
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
+
+def _sched_status(msg: str, kind: str) -> dict:
+    color  = "#15803d" if kind == "success" else "#dc2626"
+    bg     = "#f0fdf4" if kind == "success" else "#fef2f2"
+    border = "#86efac" if kind == "success" else "#fca5a5"
+    icon   = "✓" if kind == "success" else "⚠"
+    return gr.update(
+        value=(
+            f"<div style='background:{bg};border:1px solid {border};border-radius:0.5rem;"
+            f"padding:0.65rem 1rem;margin-top:0.5rem;'>"
+            f"<span style='color:{color};font-family:Inter,sans-serif;font-size:0.88rem;'>"
+            f"{icon}&nbsp;{msg}</span></div>"
+        ),
+        visible=True,
+    )
+
+
+def _run_due_schedules() -> None:
+    """Background thread: send any overdue scheduled reports with freshly generated data."""
+    try:
+        due = get_due_schedules()
+        if not due:
+            return
+        for sched in due:
+            try:
+                role = get_role(sched["username"])
+                _, query_result = get_agent().chat(
+                    user_query=sched["question"],
+                    history=[],
+                    role=role,
+                    username=sched["username"],
+                )
+                insights = ""
+                png_path = None
+                if query_result and query_result.get("rows"):
+                    chart_json, insights = get_chart_agent().analyze(
+                        rows=query_result["rows"],
+                        columns=query_result["columns"],
+                        user_question=sched["question"],
+                        role=role,
+                    )
+                    if chart_json:
+                        fig = pio.from_json(chart_json)
+                        tmp = tempfile.NamedTemporaryFile(suffix=".png", delete=False, prefix="sched_")
+                        fig.write_image(tmp.name, width=1000, height=520, scale=2)
+                        png_path = tmp.name
+
+                freq_labels = {"weekly": "Weekly", "biweekly": "Bi-weekly", "monthly": "Monthly"}
+                days_str = f" ({', '.join(sched['days_of_week'])})" if sched["days_of_week"] else ""
+                label = freq_labels.get(sched["frequency"], "Scheduled") + days_str
+                send_report_email(sched["email"], sched["question"], insights, png_path, label)
+                mark_sent(sched["id"], sched["frequency"], sched["days_of_week"], _date.today())
+            except Exception as e:
+                print(f"[Scheduler] Failed to send report {sched['id']}: {e}")
+    except Exception as e:
+        print(f"[Scheduler] Error checking schedules: {e}")
+
 
 def _format_insights(insights: str) -> str:
     lines = [l.strip() for l in insights.strip().splitlines() if l.strip()]
@@ -282,6 +364,8 @@ def respond(message: str, history: list, request: gr.Request):
 
     # ── Stage 2: ChartAgent — visualisation + insights ───────────────────
     fig              = None
+    raw_insights     = ""
+    png_path_val     = ""
     insights_update  = gr.update(visible=False)
     chart_download   = gr.update(visible=False)
 
@@ -292,6 +376,7 @@ def respond(message: str, history: list, request: gr.Request):
             user_question=message,
             role=role,
         )
+        raw_insights = insights or ""
 
         if chart_json:
             try:
@@ -319,17 +404,76 @@ def respond(message: str, history: list, request: gr.Request):
                 export_fig.update_traces(textfont=_arial_dark)
                 export_fig.write_image(tmp.name, width=1000, height=520, scale=2)
                 chart_download = gr.update(value=tmp.name, visible=True)
+                png_path_val = tmp.name
             except Exception:
                 pass
 
         if insights:
             insights_update = gr.update(value=_format_insights(insights), visible=True)
 
+    schedule_update = gr.update(visible=fig is not None, open=fig is not None)
+
     history = history + [
         {"role": "user",      "content": message},
         {"role": "assistant", "content": text},
     ]
-    return "", history, fig, chart_download, insights_update
+    return "", history, fig, chart_download, insights_update, schedule_update, message, png_path_val, raw_insights
+
+
+def schedule_report(
+    email: str,
+    freq: str,
+    days: list,
+    start_str: str,
+    end_str: str,
+    question: str,
+    png_path: str,
+    insights: str,
+    request: gr.Request,
+) -> dict:
+    username = request.username if request else "unknown"
+
+    if not email or "@" not in email:
+        return _sched_status("Please enter a valid email address.", "error")
+    if not question:
+        return _sched_status("No report to schedule — run a query first.", "error")
+
+    freq_map = {
+        "Send now": "now", "Weekly": "weekly",
+        "Bi-weekly": "biweekly", "Monthly": "monthly",
+    }
+    freq_key = freq_map.get(freq, "now")
+
+    if freq_key == "now":
+        try:
+            send_report_email(email, question, insights, png_path or None, "On demand")
+            return _sched_status(f"Report sent to {email}!", "success")
+        except Exception as e:
+            return _sched_status(f"Could not send email: {e}", "error")
+
+    try:
+        start_date = _date.fromisoformat(start_str.strip()) if start_str.strip() else _date.today()
+    except ValueError:
+        return _sched_status("Invalid start date — use YYYY-MM-DD (e.g. 2025-07-01).", "error")
+
+    end_date = None
+    if end_str and end_str.strip():
+        try:
+            end_date = _date.fromisoformat(end_str.strip())
+        except ValueError:
+            return _sched_status("Invalid end date — use YYYY-MM-DD (e.g. 2025-12-31).", "error")
+
+    try:
+        save_schedule(username, email, question, freq_key, list(days or []), start_date, end_date)
+        freq_labels = {"weekly": "weekly", "biweekly": "every two weeks", "monthly": "monthly"}
+        days_str = f" on {', '.join(days)}" if days else ""
+        return _sched_status(
+            f"Scheduled {freq_labels[freq_key]}{days_str}, starting {start_date}. "
+            "You'll receive fresh data each delivery.",
+            "success",
+        )
+    except Exception as e:
+        return _sched_status(f"Could not save schedule: {e}", "error")
 
 
 def fill_input(template: str) -> str:
@@ -346,6 +490,7 @@ def build_schema_panel(request: gr.Request) -> tuple:
 
 
 def build_heading(request: gr.Request) -> str:
+    threading.Thread(target=_run_due_schedules, daemon=True).start()
     if not request or not request.username:
         return _heading_html()
     role = get_role(request.username)
@@ -421,17 +566,80 @@ def build_ui():
         # 9 ── Key Insights (hidden until ChartAgent returns analysis)
         insights_box = gr.HTML(value="", visible=False)
 
+        # 10 ── Hidden state: carry current question / png / insights into schedule handler
+        current_question = gr.State("")
+        current_png      = gr.State("")
+        current_insights = gr.State("")
+
+        # 11 ── Schedule panel (revealed after a chart is rendered)
+        with gr.Accordion(
+            "📅  Schedule this report",
+            open=True,
+            visible=False,
+            elem_classes=["schedule-panel"],
+        ) as schedule_panel:
+            gr.HTML(_SCHEDULE_INTRO)
+            sched_email = gr.Textbox(
+                label="Email address",
+                placeholder="you@example.com",
+            )
+            sched_freq = gr.Radio(
+                choices=["Send now", "Weekly", "Bi-weekly", "Monthly"],
+                value="Send now",
+                label="Frequency",
+            )
+            sched_days = gr.CheckboxGroup(
+                choices=["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"],
+                label="Day(s) of week",
+                visible=False,
+            )
+            sched_start = gr.Textbox(
+                label="Start date",
+                placeholder="YYYY-MM-DD",
+                value=str(_date.today()),
+                visible=False,
+            )
+            sched_end = gr.Textbox(
+                label="End date (optional — leave blank to repeat indefinitely)",
+                placeholder="YYYY-MM-DD",
+                visible=False,
+            )
+            sched_btn    = gr.Button("Send Report →", variant="primary", size="sm")
+            sched_status = gr.HTML("", visible=False)
+
         # ── Events ───────────────────────────────────────────────────────
-        send_btn.click(
-            fn=respond,
-            inputs=[msg_box, chatbot],
-            outputs=[msg_box, chatbot, chart_output, download_btn, insights_box],
+        _respond_outputs = [
+            msg_box, chatbot, chart_output, download_btn, insights_box,
+            schedule_panel, current_question, current_png, current_insights,
+        ]
+        send_btn.click(fn=respond, inputs=[msg_box, chatbot], outputs=_respond_outputs)
+        msg_box.submit(fn=respond, inputs=[msg_box, chatbot], outputs=_respond_outputs)
+
+        def _on_freq_change(freq):
+            show_days  = freq in ("Weekly", "Bi-weekly")
+            show_dates = freq != "Send now"
+            btn_label  = "Send Report →" if freq == "Send now" else "Schedule Report →"
+            return (
+                gr.update(visible=show_days),
+                gr.update(visible=show_dates),
+                gr.update(visible=show_dates),
+                gr.update(value=btn_label),
+            )
+
+        sched_freq.change(
+            fn=_on_freq_change,
+            inputs=sched_freq,
+            outputs=[sched_days, sched_start, sched_end, sched_btn],
         )
-        msg_box.submit(
-            fn=respond,
-            inputs=[msg_box, chatbot],
-            outputs=[msg_box, chatbot, chart_output, download_btn, insights_box],
+        sched_btn.click(
+            fn=schedule_report,
+            inputs=[
+                sched_email, sched_freq, sched_days, sched_start, sched_end,
+                current_question, current_png, current_insights,
+            ],
+            outputs=[sched_status],
         )
+
         for btn, tpl in tpl_btns:
             btn.click(fn=fill_input, inputs=gr.State(tpl), outputs=msg_box)
 
