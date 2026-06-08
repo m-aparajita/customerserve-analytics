@@ -224,6 +224,10 @@ def get_sample_data(table: str, limit: int = 5) -> str:
     return json.dumps({"columns": list(df.columns), "rows": df.to_dict(orient="records")}, default=str)
 
 
+def _label(col: str) -> str:
+    return col.replace("_", " ").title()
+
+
 def _format_abbrev(v: float) -> str:
     """Return a K / Mn / Bn abbreviated label for a number."""
     abs_v = abs(v)
@@ -268,50 +272,57 @@ def build_chart(data: list, chart_type: str, x_col: str, y_col: str,
     _PIE_SEQ   = ["#7c3aed", "#0891b2", "#059669", "#d97706", "#dc2626", "#4f46e5"]
 
     try:
+        x_label = _label(x_col)
+        y_label = _label(y_col)
+        lbl = {x_col: x_label, y_col: y_label}
+
         if chart_type == "bar":
             fig = px.bar(df, x=x_col, y=y_col, title=title,
-                         color_discrete_sequence=[_PRIMARY])
+                         labels=lbl, color_discrete_sequence=[_PRIMARY])
             _apply_abbrev_y_axis(fig, df[y_col])
             fig.update_traces(
-                hovertemplate=f"%{{x}}<br>{y_col}: %{{y:,.2f}}<extra></extra>"
+                hovertemplate=f"%{{x}}<br>{y_label}: %{{y:,.2f}}<extra></extra>"
             )
         elif chart_type == "line":
             fig = px.line(df, x=x_col, y=y_col, title=title, markers=True,
-                          color_discrete_sequence=[_PRIMARY])
+                          labels=lbl, color_discrete_sequence=[_PRIMARY])
             _apply_abbrev_y_axis(fig, df[y_col])
             fig.update_traces(
-                hovertemplate=f"%{{x}}<br>{y_col}: %{{y:,.2f}}<extra></extra>",
+                hovertemplate=f"%{{x}}<br>{y_label}: %{{y:,.2f}}<extra></extra>",
                 line=dict(width=2.5),
                 marker=dict(size=6),
             )
         elif chart_type == "pie":
             fig = px.pie(df, names=x_col, values=y_col, title=title,
-                         color_discrete_sequence=_PIE_SEQ)
+                         labels=lbl, color_discrete_sequence=_PIE_SEQ)
             fig.update_traces(
                 hovertemplate="%{label}<br>Value: %{value:,.2f}<br>%{percent}<extra></extra>",
                 textfont=dict(color="#f0f0f8"),
             )
         elif chart_type == "scatter":
             fig = px.scatter(df, x=x_col, y=y_col, title=title,
-                             color_discrete_sequence=[_PRIMARY])
+                             labels=lbl, color_discrete_sequence=[_PRIMARY])
             _apply_abbrev_y_axis(fig, df[y_col])
             fig.update_traces(
-                hovertemplate=f"%{{x}}<br>{y_col}: %{{y:,.2f}}<extra></extra>",
+                hovertemplate=f"%{{x}}<br>{y_label}: %{{y:,.2f}}<extra></extra>",
                 marker=dict(size=8, opacity=0.85),
             )
         elif chart_type == "histogram":
             fig = px.histogram(df, x=x_col, title=title,
-                               color_discrete_sequence=[_PRIMARY])
+                               labels={x_col: x_label}, color_discrete_sequence=[_PRIMARY])
             fig.update_traces(
-                hovertemplate=f"{x_col}: %{{x}}<br>Count: %{{y:,}}<extra></extra>"
+                hovertemplate=f"{x_label}: %{{x}}<br>Count: %{{y:,}}<extra></extra>"
             )
         else:
             fig = px.bar(df, x=x_col, y=y_col, title=title,
-                         color_discrete_sequence=[_PRIMARY])
+                         labels=lbl, color_discrete_sequence=[_PRIMARY])
             _apply_abbrev_y_axis(fig, df[y_col])
             fig.update_traces(
-                hovertemplate=f"%{{x}}<br>{y_col}: %{{y:,.2f}}<extra></extra>"
+                hovertemplate=f"%{{x}}<br>{y_label}: %{{y:,.2f}}<extra></extra>"
             )
+
+        _axis_font = dict(family="Inter, system-ui, sans-serif", size=11, color="#374151")
+        _axis_title_font = dict(family="Inter, system-ui, sans-serif", size=12, color="#4b5563")
 
         fig.update_layout(
             paper_bgcolor="rgba(0,0,0,0)",
@@ -319,15 +330,17 @@ def build_chart(data: list, chart_type: str, x_col: str, y_col: str,
             font=dict(family="Inter, system-ui, sans-serif", color="#1e1b4b", size=12),
             title=dict(font=dict(family="Space Grotesk, sans-serif", size=15, color="#3b0764")),
             xaxis=dict(
+                title=dict(font=_axis_title_font),
                 gridcolor="rgba(0,0,0,0.07)",
                 linecolor="rgba(0,0,0,0.15)",
-                tickfont=dict(color="#374151", size=11),
+                tickfont=_axis_font,
                 automargin=True,
             ),
             yaxis=dict(
+                title=dict(font=_axis_title_font),
                 gridcolor="rgba(0,0,0,0.07)",
                 linecolor="rgba(0,0,0,0.15)",
-                tickfont=dict(color="#374151", size=11),
+                tickfont=_axis_font,
                 automargin=True,
             ),
             hoverlabel=dict(
@@ -340,7 +353,7 @@ def build_chart(data: list, chart_type: str, x_col: str, y_col: str,
                 bordercolor="rgba(0,0,0,0.10)",
                 font=dict(color="#1e1b4b"),
             ),
-            margin=dict(t=50, l=70, r=20, b=55),
+            margin=dict(t=50, l=80, r=20, b=70),
         )
         return json.dumps({"chart_json": fig.to_json(), "chart_type": chart_type})
     except Exception as exc:
