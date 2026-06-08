@@ -42,18 +42,41 @@ Each bullet must highlight one notable trend, anomaly, or standout figure from t
 Maximum 15 words per bullet. No preamble — output only the bullets.
 """
 
-# ChartAgent only has access to build_chart
+# ChartAgent-specific build_chart schema: data is injected by the agent, not the LLM.
 _TOOLS = [
     {
         "type": "function",
         "function": {
-            "name": t["name"],
-            "description": t["description"],
-            "parameters": t["parameters"],
+            "name": "build_chart",
+            "description": (
+                "Create a Plotly visualisation from the query results. "
+                "The data is supplied automatically — you only need to specify "
+                "chart_type, x_col, y_col, and title."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "chart_type": {
+                        "type": "string",
+                        "description": "One of: bar, line, pie, scatter, histogram.",
+                    },
+                    "x_col": {
+                        "type": "string",
+                        "description": "Column name for the X axis (or pie labels).",
+                    },
+                    "y_col": {
+                        "type": "string",
+                        "description": "Column name for the Y axis (or pie values).",
+                    },
+                    "title": {
+                        "type": "string",
+                        "description": "A concise descriptive chart title.",
+                    },
+                },
+                "required": ["chart_type", "x_col", "y_col"],
+            },
         },
     }
-    for t in TOOL_DECLARATIONS
-    if t["name"] == "build_chart"
 ]
 
 
