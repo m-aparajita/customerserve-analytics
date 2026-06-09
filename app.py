@@ -235,9 +235,7 @@ def _heading_html(username: str = "", role_label: str = "") -> str:
               margin:0;
               max-width:560px;
               font-family:Inter,sans-serif;">
-      Ask questions about orders, products, and sales in plain English.
-      The agent writes SQL, queries the database, and draws charts for you.
-      Schedule reports and get notified by email automatically.
+      Ask questions in plain English — get instant charts and insights, and schedule email reports.
     </p>
   </div>
   <div style="flex-shrink:0;padding-top:0.35rem;">{badge}</div>
