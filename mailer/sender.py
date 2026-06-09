@@ -13,6 +13,7 @@ def send_report_email(
     if not api_key:
         raise ValueError("RESEND_API_KEY is not set")
 
+    to_email = to_email.strip().lower()
     resend.api_key = api_key
     from_addr = os.getenv("RESEND_FROM_EMAIL", "Order Insights <onboarding@resend.dev>")
 
