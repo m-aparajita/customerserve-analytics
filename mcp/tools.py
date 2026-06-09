@@ -142,6 +142,8 @@ def get_schema_html() -> str:
     schema = json.loads(get_schema())
     panels = ""
     for tbl, info in schema.items():
+        if tbl in ("scheduled_reports", "query_logs"):
+            continue
         icon = _TABLE_ICONS.get(tbl, "📋")
         count_fmt = f"{info['row_count']:,}"
         col_rows = "".join(
