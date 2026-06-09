@@ -124,7 +124,7 @@ class ChartAgent:
             )
             msg = response.choices[0].message
 
-            asst_entry: dict = {"role": "assistant", "content": msg.content or ""}
+            asst_entry: dict = {"role": "assistant", "content": msg.content or None}
             if msg.tool_calls:
                 asst_entry["tool_calls"] = [
                     {

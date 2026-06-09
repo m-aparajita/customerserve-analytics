@@ -268,6 +268,8 @@ def build_chart(data: list, chart_type: str, x_col: str, y_col: str,
     if x_col not in df.columns or (chart_type != "histogram" and y_col not in df.columns):
         return json.dumps({"error": f"Column '{x_col}' or '{y_col}' not found in data."})
 
+    df[x_col] = df[x_col].fillna("(Unknown)")
+
     # Colours that read clearly on a light/white background
     _PRIMARY   = "#7c3aed"   # deep violet
     _SECONDARY = "#0891b2"   # dark cyan

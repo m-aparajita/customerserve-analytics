@@ -113,7 +113,7 @@ class QueryAgent:
 
             asst_entry: dict = {
                 "role": "assistant",
-                "content": last_msg.content or "",
+                "content": last_msg.content or None,
             }
             if last_msg.tool_calls:
                 asst_entry["tool_calls"] = [
