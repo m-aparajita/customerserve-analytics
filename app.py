@@ -21,7 +21,7 @@ from agent.gemini_agent import get_agent
 from agent.chart_agent import get_chart_agent
 from auth.manager import get_role, gradio_auth_pairs
 from auth.roles import VIEWER_TEMPLATES, Role, PERMISSIONS
-from mailer.sender import send_report_email
+from mailer.sender import send_email
 
 print("Initialising database …")
 setup_database()
@@ -314,7 +314,8 @@ def _run_due_schedules() -> None:
                 freq_labels = {"weekly": "Weekly", "biweekly": "Bi-weekly", "monthly": "Monthly"}
                 days_str = f" ({', '.join(sched['days_of_week'])})" if sched["days_of_week"] else ""
                 label = freq_labels.get(sched["frequency"], "Scheduled") + days_str
-                send_report_email(sched["email"], sched["question"], insights, png_path, label)
+                body = _build_report_email_html(sched["question"], insights, label)
+                send_email(sched["email"], f"Order Insights: {sched['question'][:80]}", body, png_path)
                 mark_sent(sched["id"], sched["frequency"], sched["days_of_week"], _date.today())
             except Exception as e:
                 print(f"[Scheduler] Failed to send report {sched['id']}: {e}")
@@ -337,6 +338,43 @@ def _format_insights(insights: str) -> str:
         "<ul style='margin:0;padding-left:1.2rem;color:#1e1b4b;"
         "font-family:Inter,sans-serif;font-size:0.88rem;line-height:1.7;'>"
         f"{items}</ul></div>"
+    )
+
+
+def _build_report_email_html(question: str, insights: str, schedule_label: str) -> str:
+    insights_html = ""
+    if insights:
+        lines = [l.strip() for l in insights.strip().splitlines() if l.strip()]
+        items = "".join(
+            f"<li style='margin:4px 0;color:#1e1b4b;'>{l.lstrip('•- ')}</li>"
+            for l in lines
+        )
+        insights_html = (
+            "<div style='background:#f0fdf4;border:1px solid #86efac;border-radius:8px;"
+            "padding:12px 16px;margin:16px 0;'>"
+            "<p style='font-weight:600;color:#15803d;font-size:12px;text-transform:uppercase;"
+            "letter-spacing:0.1em;margin:0 0 8px;font-family:Inter,sans-serif;'>Key Insights</p>"
+            f"<ul style='margin:0;padding-left:20px;font-size:14px;line-height:1.7;"
+            f"font-family:Inter,sans-serif;'>{items}</ul></div>"
+        )
+
+    return (
+        "<div style='font-family:Inter,system-ui,sans-serif;max-width:600px;"
+        "margin:0 auto;padding:24px;'>"
+        "<h1 style='color:#3b0764;font-size:22px;font-weight:700;margin:0 0 4px;'>"
+        "Order Insights</h1>"
+        "<p style='color:#6b7280;font-size:13px;margin:0 0 24px;'>Your scheduled report</p>"
+        "<div style='background:#f5f3ff;border-radius:8px;padding:16px;margin:0 0 8px;'>"
+        "<p style='font-weight:600;color:#5b21b6;font-size:11px;text-transform:uppercase;"
+        "letter-spacing:0.12em;margin:0 0 6px;font-family:Inter,sans-serif;'>Question</p>"
+        f"<p style='color:#1e1b4b;margin:0;font-size:15px;font-family:Inter,sans-serif;'>"
+        f"{question}</p></div>"
+        f"{insights_html}"
+        "<p style='color:#6b7280;font-size:13px;font-family:Inter,sans-serif;'>"
+        "The chart is attached as <strong>chart.png</strong>.</p>"
+        "<hr style='border:none;border-top:1px solid #e5e7eb;margin:24px 0;'>"
+        f"<p style='color:#9ca3af;font-size:11px;font-family:Inter,sans-serif;'>"
+        f"Schedule: {schedule_label} &middot; Order Insights Analytics</p></div>"
     )
 
 
@@ -445,7 +483,8 @@ def schedule_report(
 
     if freq_key == "now":
         try:
-            send_report_email(email, question, insights, png_path or None, "On demand")
+            body = _build_report_email_html(question, insights, "On demand")
+            send_email(email, f"Order Insights: {question[:80]}", body, png_path or None)
             return _sched_status(f"Report sent to {email}!", "success")
         except Exception as e:
             return _sched_status(f"Could not send email: {e}", "error")
