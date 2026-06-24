@@ -380,7 +380,7 @@ def _build_report_email_html(question: str, insights: str, schedule_label: str) 
 
 # ── Handlers ──────────────────────────────────────────────────────────────────
 
-def respond(message: str, history: list, request: gr.Request):
+def respond(message: str, history: list, deep_insights: bool, request: gr.Request):
     username    = request.username
     role        = get_role(username)
     query_agent = get_agent()
@@ -410,6 +410,7 @@ def respond(message: str, history: list, request: gr.Request):
         chart_json, insights = chart_agent.analyze(
             rows=query_result["rows"],
             columns=query_result["columns"],
+            deep_insights=deep_insights,
             user_question=message,
             role=role,
         )
@@ -568,6 +569,12 @@ def build_ui():
             max_lines=8,
         )
 
+        # 3b ── Deep insights toggle
+        deep_insights_chk = gr.Checkbox(
+            label="Want me to include related insights?",
+            value=False,
+        )
+
         # 4 ── Send button
         send_btn = gr.Button("Send →", variant="primary")
 
@@ -650,8 +657,8 @@ def build_ui():
             msg_box, chatbot, chart_output, download_btn, insights_box,
             schedule_panel, current_question, current_png, current_insights,
         ]
-        send_btn.click(fn=respond, inputs=[msg_box, chatbot], outputs=_respond_outputs)
-        msg_box.submit(fn=respond, inputs=[msg_box, chatbot], outputs=_respond_outputs)
+        send_btn.click(fn=respond, inputs=[msg_box, chatbot, deep_insights_chk], outputs=_respond_outputs)
+        msg_box.submit(fn=respond, inputs=[msg_box, chatbot, deep_insights_chk], outputs=_respond_outputs)
 
         def _on_freq_change(freq):
             show_days  = freq in ("Weekly", "Bi-weekly")

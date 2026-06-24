@@ -21,6 +21,7 @@ load_dotenv()
 
 _MODEL_NAME = "meta-llama/llama-4-scout-17b-16e-instruct"
 _MAX_TOOL_ROUNDS = 3
+_MAX_TOOL_ROUNDS_DEEP = 6
 _MAX_ROWS_TO_CHART = 200
 
 _SYSTEM_PROMPT = """You are a data visualisation and insight specialist.
@@ -61,6 +62,17 @@ Rules:
   - No preamble — output only the 3 bullets
 """
 
+_DEEP_INSIGHT_ADDENDUM = """
+Step 2.5 — DEEP INSIGHTS MODE (active). After calling build_chart, run ONE follow-up query_database call to fetch the time or comparison dimension that is missing from the original data.
+  - Call get_schema first if you need to confirm table/column names.
+  - If the original data is grouped by a category (e.g. status, product) with no date column →
+    query that same category broken down by month or quarter.
+  - If the original data is already time-based or already contains enough comparison context →
+    skip this step entirely.
+  - Keep the follow-up query simple and targeted.
+Use results from the follow-up query in your 3 bullets to tell a time or contrast story.
+"""
+
 # ChartAgent-specific build_chart schema: data is injected by the agent, not the LLM.
 _TOOLS = [
     {
@@ -99,6 +111,32 @@ _TOOLS = [
 ]
 
 
+_DEEP_EXTRA_TOOLS = [
+    {
+        "type": "function",
+        "function": {
+            "name": "get_schema",
+            "description": "Return table names, column names, and data types. Call this before query_database if you are unsure of exact column names.",
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "query_database",
+            "description": "Run a follow-up SQL SELECT to fetch the time trend or comparison dimension missing from the original data.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "sql": {"type": "string", "description": "A valid SQL SELECT statement."}
+                },
+                "required": ["sql"],
+            },
+        },
+    },
+]
+
+
 class ChartAgent:
     def __init__(self) -> None:
         self._client = Groq(api_key=os.environ["GROQ_API_KEY"])
@@ -109,6 +147,7 @@ class ChartAgent:
         columns: list,
         user_question: str,
         role: Role,
+        deep_insights: bool = False,
     ) -> tuple[str | None, str | None]:
         """Return (chart_json, insights_text)."""
 
@@ -120,19 +159,23 @@ class ChartAgent:
             f"Data:\n{json.dumps(sample, default=str)}"
         )
 
+        system_prompt = _SYSTEM_PROMPT + (_DEEP_INSIGHT_ADDENDUM if deep_insights else "")
+        tools = _TOOLS + (_DEEP_EXTRA_TOOLS if deep_insights else [])
+        max_rounds = _MAX_TOOL_ROUNDS_DEEP if deep_insights else _MAX_TOOL_ROUNDS
+
         messages = [
-            {"role": "system", "content": _SYSTEM_PROMPT},
+            {"role": "system", "content": system_prompt},
             {"role": "user",   "content": user_content},
         ]
 
         chart_json: str | None = None
         insights:   str | None = None
 
-        for _ in range(_MAX_TOOL_ROUNDS):
+        for _ in range(max_rounds):
             response = self._client.chat.completions.create(
                 model=_MODEL_NAME,
                 messages=messages,
-                tools=_TOOLS,
+                tools=tools,
                 tool_choice="auto",
                 max_tokens=1024,
             )
