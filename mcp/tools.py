@@ -231,26 +231,49 @@ def _label(col: str) -> str:
 
 
 def _format_abbrev(v: float) -> str:
-    """Return a K / Mn / Bn abbreviated label for a number."""
     abs_v = abs(v)
+    if abs_v == 0:
+        return "0"
     if abs_v >= 1_000_000_000:
-        return f"{v / 1_000_000_000:.2f}Bn"
+        return f"{v / 1_000_000_000:.1f}".rstrip("0").rstrip(".") + "Bn"
     if abs_v >= 1_000_000:
-        return f"{v / 1_000_000:.2f}Mn"
+        return f"{v / 1_000_000:.1f}".rstrip("0").rstrip(".") + "Mn"
     if abs_v >= 1_000:
-        return f"{v / 1_000:.2f}K"
-    return f"{v:.2f}"
+        return f"{v / 1_000:.1f}".rstrip("0").rstrip(".") + "K"
+    return f"{v:.1f}".rstrip("0").rstrip(".")
+
+
+def _nice_ticks(mn: float, mx: float, target: int = 5) -> list[float]:
+    """Generate clean round tick values that always include 0."""
+    mn = min(0.0, mn)
+    data_range = mx - mn
+    if data_range == 0:
+        return [mn]
+    raw_step = data_range / (target - 1)
+    magnitude = 10 ** float(np.floor(np.log10(raw_step)))
+    step = next(
+        f * magnitude for f in (1, 2, 2.5, 5, 10) if f * magnitude >= raw_step
+    )
+    tick_start = float(np.floor(mn / step) * step)
+    ticks, v = [], tick_start
+    while v <= mx + step * 0.01:
+        ticks.append(round(v, 10))
+        v += step
+    return ticks
 
 
 def _apply_abbrev_y_axis(fig, series: pd.Series) -> None:
-    """Replace y-axis tick labels with K / Mn / Bn abbreviations."""
     try:
-        mn, mx = float(series.min()), float(series.max())
+        mx, mn = float(series.max()), float(series.min())
         if mn == mx:
             return
-        tickvals = np.linspace(mn, mx, 5).tolist()
-        ticktext = [_format_abbrev(v) for v in tickvals]
-        fig.update_yaxes(tickvals=tickvals, ticktext=ticktext, automargin=True)
+        tickvals = _nice_ticks(mn, mx)
+        fig.update_yaxes(
+            tickvals=tickvals,
+            ticktext=[_format_abbrev(v) for v in tickvals],
+            range=[tickvals[0], tickvals[-1]],
+            automargin=True,
+        )
     except Exception:
         pass
 
