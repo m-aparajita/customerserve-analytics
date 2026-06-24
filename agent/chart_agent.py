@@ -62,15 +62,54 @@ Rules:
   - No preamble — output only the 3 bullets
 """
 
-_DEEP_INSIGHT_ADDENDUM = """
-Step 2.5 — DEEP INSIGHTS MODE (active). After calling build_chart, run ONE follow-up query_database call to fetch the time or comparison dimension that is missing from the original data.
-  - Call get_schema first if you need to confirm table/column names.
-  - If the original data is grouped by a category (e.g. status, product) with no date column →
-    query that same category broken down by month or quarter.
-  - If the original data is already time-based or already contains enough comparison context →
-    skip this step entirely.
-  - Keep the follow-up query simple and targeted.
-Use results from the follow-up query in your 3 bullets to tell a time or contrast story.
+_SYSTEM_PROMPT_DEEP = """You are a data visualisation and insight specialist.
+You receive query results and the user's original question.
+
+Step 1 — choose the best chart type:
+  - line      : time-series or sequential data (dates, months, ordered categories)
+  - bar       : categorical comparisons (products, cities, brands, counts)
+  - pie       : part-of-whole with 6 or fewer categories
+  - scatter   : correlation between two numeric columns
+  - histogram : distribution of a single numeric column
+  Skip build_chart ONLY if the result is a single scalar number.
+
+Step 2 — call build_chart immediately. Use EXACT column names from the data.
+  Required parameters:
+    chart_type : one of bar / line / pie / scatter / histogram
+    x_col      : exact column name for the X axis (or pie labels)
+    y_col      : exact column name for the Y axis (or pie values)
+    title      : short descriptive title (e.g. "Monthly Revenue 2024")
+  Do NOT include a data parameter — the rows are injected automatically.
+
+Step 2.5 — ENRICHMENT (do this before writing any bullets).
+  The original data likely shows a snapshot (e.g. totals by category). You must now run
+  ONE follow-up query_database call to fetch the time or comparison dimension that makes
+  the story richer. Use get_schema first if you need to confirm column names.
+  Examples:
+    • Original data: order count by payment method → query the same breakdown by month
+    • Original data: revenue by product → query those products' revenue month by month
+    • Original data: order count by status → query each status grouped by month or quarter
+  Only skip this step if the original data already has a date/time column with multiple periods.
+  Keep the follow-up query simple and use exact column names.
+
+Step 3 — after the enrichment query returns, write exactly 3 bullet points using the • character.
+  Use BOTH the original data AND the enrichment query results to tell a story.
+  First, identify the best narrative frame:
+  - Time        : lead with the trend arc (growth, peak, decline) using specific months and numbers
+  - Contrast    : find the biggest divergence between categories over time, name both sides
+  - Outlier     : one category moved very differently from the rest — call it out with numbers
+  - Distribution: how concentration shifted over time (e.g. one method grew from 20% to 45%)
+
+  Structure your 3 bullets so they build on each other:
+  • bullet 1 — headline: the most important trend or shift, with specific numbers and time period
+  • bullet 2 — story beat: what explains or contrasts with bullet 1 (another category, a turning point)
+  • bullet 3 — hook: one concrete question or angle the user should explore next
+
+  Rules:
+  - Interpret the data, don't just report it ("Card payments surged 40% in Q2" not "Card was highest in Q2")
+  - Use specific numbers and time references from both queries
+  - Maximum 25 words per bullet
+  - No preamble — output only the 3 bullets
 """
 
 # ChartAgent-specific build_chart schema: data is injected by the agent, not the LLM.
@@ -159,7 +198,7 @@ class ChartAgent:
             f"Data:\n{json.dumps(sample, default=str)}"
         )
 
-        system_prompt = _SYSTEM_PROMPT + (_DEEP_INSIGHT_ADDENDUM if deep_insights else "")
+        system_prompt = _SYSTEM_PROMPT_DEEP if deep_insights else _SYSTEM_PROMPT
         tools = _TOOLS + (_DEEP_EXTRA_TOOLS if deep_insights else [])
         max_rounds = _MAX_TOOL_ROUNDS_DEEP if deep_insights else _MAX_TOOL_ROUNDS
 
