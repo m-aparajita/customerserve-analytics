@@ -12,9 +12,9 @@ Natural-language analytics over retail order data. QueryAgent writes SQL → Duc
 |-------|---------|
 | UI | `app.py` — Gradio, auth, schedule panel, PNG download |
 | QueryAgent | `agent/gemini_agent.py` — Groq llama-4-scout; tools: `get_schema`, `query_database`, `get_sample_data` |
-| ChartAgent | `agent/chart_agent.py` — Groq llama-4-scout; tool: `build_chart` only; returns 1–2 insight bullets |
+| ChartAgent | `agent/chart_agent.py` — Groq llama-4-scout; standard mode: `build_chart` only; deep mode: `build_chart` + `get_schema` + `query_database`; returns 3 narrative insight bullets |
 | Tools | `mcp/tools.py` — all tool implementations; schema panel excludes internal tables |
-| Mailer | `mailer/sender.py` — Resend v1.x; normalises recipient email to lowercase |
+| Mailer | `mailer/sender.py` — generic `send_email(to, subject, html, attachment)`; Resend v1.x; normalises to lowercase. HTML assembled in `app.py::_build_report_email_html` |
 | Scheduler | `database/scheduler.py` — CRUD for `scheduled_reports`; triggered on page load |
 | DB | `database/` — DuckDB in-process; tables: `orders`, `order_items`, `products`, `query_logs`, `scheduled_reports` |
 | Auth/Guardrails | `auth/`, `guardrails/` — RBAC roles; Layers 1 (input), 2 (prompt), 3 (SQL) |
@@ -26,6 +26,9 @@ Natural-language analytics over retail order data. QueryAgent writes SQL → Duc
 - **LLM:** `meta-llama/llama-4-scout-17b-16e-instruct` via Groq. Env: `GROQ_API_KEY`.
 - **Tool schema:** OpenAI format. Omit `"required"` key entirely when no params are required.
 - **ChartAgent `build_chart`:** no `data` param in schema — agent injects `fn_args["data"] = rows` before dispatch. Prevents Groq rejecting a stringified array.
+- **ChartAgent deep mode:** activated by "Want me to include related insights?" checkbox in UI. Uses `_SYSTEM_PROMPT_DEEP` (separate prompt, not an addendum) with steps ordered: build_chart → get_schema → query_database → bullets. Max 6 tool rounds, 2048 tokens. Enrichment query errors are silently ignored.
+- **ChartAgent insights:** always 3 bullets structured as headline → story beat → exploration hook. Narrative frames: Time / Contrast / Outlier / Distribution / Near-parity (values within 5%).
+- **Y-axis formatting:** `_nice_ticks()` always starts from 0, uses round intervals (1/2/2.5/5/10 × magnitude). `_format_abbrev()` strips trailing zeros (e.g. "1.2Mn" not "1.20Mn").
 - **Assistant messages:** set `content: None` (not `""`) when `tool_calls` is present — empty string causes intermittent 400s.
 - **System prompt:** keep short; model calls `get_schema` tool rather than embedding schema JSON.
 - **Email:** Resend v1.x (`resend.api_key` + `resend.Emails.send()`). Do not upgrade to v2.

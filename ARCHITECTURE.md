@@ -118,10 +118,11 @@ Order Insights is a **natural-language analytics agent** for retail order data. 
 │                      formatted)          │
 ├──────────────────────────────────────────┤
 │  EMAIL / SCHEDULER  mailer/sender.py     │
+│                     send_email(to,subj,  │
+│                     html,attachment)     │
+│                     HTML built in app.py │
 │                     database/scheduler   │
 │                     Resend API (v1.x)    │
-│                     scheduled_reports    │
-│                     table in DuckDB      │
 ├──────────────────────────────────────────┤
 │  DATA               DuckDB (in-process)  │
 │                     CSV → HF Dataset     │
@@ -234,29 +235,49 @@ Round 3:  LLM receives rows          → writes text answer
 **Schema caching:** `get_schema()` queries DuckDB once at startup and stores the result in `_schema_cache`. Every subsequent call returns instantly with no DB round-trip.
 
 ### ChartAgent (`agent/chart_agent.py`)
-Owns visualisation and insight. Runs only when QueryAgent returns rows. Tool loop (max 3 rounds):
+Owns visualisation and insight. Runs only when QueryAgent returns rows. Two modes:
 
+**Standard mode** (max 3 rounds, 1024 tokens):
 ```
 Round 1:  Receives rows + user question → decides chart type → calls build_chart()
-Round 2:  Receives chart confirmation   → writes 1–2 insight bullets
+Round 2:  Receives chart confirmation   → writes 3 insight bullets
           Loop exits → returns (chart_json, insights)
 ```
 
-ChartAgent prompt rules for chart selection:
+**Deep insights mode** (max 6 rounds, 2048 tokens) — activated by UI checkbox:
+```
+Round 1:  Receives rows + user question → calls build_chart()
+Round 2:  Receives chart confirmation   → calls get_schema() to confirm column names
+Round 3:  Receives schema              → calls query_database() for time/comparison dimension
+Round 4:  Receives enrichment rows     → writes 3 narrative insight bullets
+          Loop exits → returns (chart_json, insights)
+```
+Deep mode uses a completely separate system prompt (`_SYSTEM_PROMPT_DEEP`) with steps ordered correctly. Enrichment query errors are silently ignored — model falls back to original data.
+
+**Chart type selection rules:**
 - **line** — time-series or sequential data
 - **bar** — categorical comparisons
 - **pie** — part-of-whole with ≤ 6 categories
 - **scatter** — correlation between two numeric columns
 - **histogram** — distribution of a single numeric column
 
-**Key implementation detail — `data` not in tool schema:** The ChartAgent's `build_chart` schema deliberately omits the `data` parameter. The agent injects `fn_args["data"] = rows` before calling dispatch. This avoids a Groq validation error where the LLM would JSON-stringify the array into a string, which fails schema validation (`expected array, got string`). The LLM only specifies `chart_type`, `x_col`, `y_col`, and `title`.
+**Insight narrative frames** (model picks the best fit):
+- **Time** — trend arc using specific months/periods
+- **Contrast** — biggest divergence between two categories with numbers
+- **Outlier** — one value significantly above/below the rest
+- **Distribution** — concentration across a ranking
+- **Near-parity** — values within 5% of each other (tight competition IS the story)
+
+Bullets are always structured: headline → story beat → exploration hook.
+
+**Key implementation detail — `data` not in tool schema:** The ChartAgent's `build_chart` schema deliberately omits the `data` parameter. The agent injects `fn_args["data"] = rows` before calling dispatch. This avoids a Groq validation error where the LLM would JSON-stringify the array into a string. The LLM only specifies `chart_type`, `x_col`, `y_col`, and `title`.
 
 ### Why separate agents?
 | Concern | QueryAgent | ChartAgent |
 |---------|-----------|------------|
-| Tools | get_schema, query_database, get_sample_data | build_chart only |
+| Tools | get_schema, query_database, get_sample_data | build_chart (+ get_schema, query_database in deep mode) |
 | Skill | SQL reasoning, schema navigation | Visual storytelling, pattern recognition |
-| Rounds | Up to 8 | Up to 3 |
+| Rounds | Up to 8 | Up to 3 (standard) / 6 (deep) |
 | Failure mode | Bad SQL → guardrail catches it | Bad chart choice → benign, still shows something |
 
 Each agent can be tuned, swapped, or scaled independently. In production, ChartAgent could use a smaller/cheaper model since chart selection is a simpler task than SQL generation.
@@ -491,10 +512,10 @@ These are gaps you should be ready to discuss in interviews:
 ## 14. Interview Talking Points
 
 **"Walk me through your architecture."**
-> Single-process Python app with a two-agent pipeline. Gradio handles UI and auth. A QueryAgent talks to Groq to write SQL and retrieve data. The rows are then handed off to a ChartAgent, which independently decides the best visualisation and surfaces 1–2 key insights — trends, anomalies, standout figures. Everything runs in one Docker container on HuggingFace Spaces free tier.
+> Single-process Python app with a two-agent pipeline. Gradio handles UI and auth. A QueryAgent talks to Groq to write SQL and retrieve data. The rows are handed off to a ChartAgent, which independently decides the best visualisation and surfaces 3 narrative insight bullets structured as headline → story beat → exploration hook. There's also an optional deep insights mode where the ChartAgent runs a follow-up enrichment query to fetch the time or comparison dimension missing from the original result — activated by a checkbox in the UI. Everything runs in one Docker container on HuggingFace Spaces free tier.
 
 **"Why two agents instead of one?"**
-> QueryAgent and ChartAgent have genuinely different skills. QueryAgent needs to reason about schema, write correct SQL, and understand business intent. ChartAgent needs to understand visual storytelling — which chart type fits the data shape, and what pattern is worth surfacing. Separating them means each has a focused system prompt, a minimal tool set, and can be tuned or swapped independently. In production, ChartAgent could run on a smaller, cheaper model since chart selection is a simpler task than SQL generation.
+> QueryAgent and ChartAgent have genuinely different skills. QueryAgent needs to reason about schema, write correct SQL, and understand business intent. ChartAgent needs to understand visual storytelling — which chart type fits the data shape, which narrative frame (time trend, contrast, outlier, near-parity) best tells the story, and what to explore next. Separating them means each has a focused system prompt, a minimal tool set, and can be tuned or swapped independently. In production, ChartAgent could run on a smaller, cheaper model since chart selection is a simpler task than SQL generation.
 
 **"Why DuckDB instead of PostgreSQL?"**
 > DuckDB is an in-process analytical database — it runs inside the Python process with no server, no network, and no configuration. For read-heavy analytics workloads (GROUP BY, SUM, window functions), it outperforms SQLite significantly. It was the right choice for a single-container deployment where I couldn't run a separate database server.
