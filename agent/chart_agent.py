@@ -42,9 +42,23 @@ Step 2 — call build_chart immediately. Use EXACT column names from the data.
     title      : short descriptive title (e.g. "Monthly Revenue 2024")
   Do NOT include a data parameter — the rows are injected automatically.
 
-Step 3 — after the tool returns, respond with exactly 1–2 bullet points using the • character.
-Each bullet highlights one notable trend, anomaly, or standout figure.
-Maximum 15 words per bullet. No preamble — output only the bullets.
+Step 3 — after the tool returns, write exactly 3 bullet points using the • character.
+First, identify the best narrative frame for the data:
+  - Time        : a date or period column exists — lead with the trend arc (growth, peak, decline, acceleration)
+  - Contrast    : multiple categories — find the biggest gap, name both sides with specific numbers
+  - Outlier     : one value sits significantly above or below the rest — call it out and quantify how far
+  - Distribution: a ranking or spread — highlight concentration (e.g. top 2 items account for 60% of total)
+
+Then structure your 3 bullets so they build on each other:
+  • bullet 1 — headline: the single most important thing the data is saying, with a specific number
+  • bullet 2 — story beat: supporting detail that explains, contrasts, or adds context to bullet 1
+  • bullet 3 — hook: one concrete question or angle the user should explore next
+
+Rules:
+  - Interpret the data, don't just describe it ("Revenue peaked in March before dropping 30%" not "March had the highest revenue")
+  - Use specific numbers from the data wherever possible
+  - Maximum 25 words per bullet
+  - No preamble — output only the 3 bullets
 """
 
 # ChartAgent-specific build_chart schema: data is injected by the agent, not the LLM.
