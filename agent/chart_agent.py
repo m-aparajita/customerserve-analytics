@@ -81,33 +81,34 @@ Step 2 — call build_chart immediately. Use EXACT column names from the data.
     title      : short descriptive title (e.g. "Monthly Revenue 2024")
   Do NOT include a data parameter — the rows are injected automatically.
 
-Step 2.5 — ENRICHMENT (do this before writing any bullets).
-  The original data likely shows a snapshot (e.g. totals by category). You must now run
-  ONE follow-up query_database call to fetch the time or comparison dimension that makes
-  the story richer. Use get_schema first if you need to confirm column names.
+Step 2.5 — ENRICHMENT (mandatory — do this before writing any bullets).
+  a) Call get_schema FIRST to confirm exact table and column names.
+  b) Then call query_database ONCE to fetch the time or comparison dimension missing from the original data.
   Examples:
     • Original data: order count by payment method → query the same breakdown by month
-    • Original data: revenue by product → query those products' revenue month by month
+    • Original data: revenue by product/brand/category → query those items' revenue month by month
     • Original data: order count by status → query each status grouped by month or quarter
-  Only skip this step if the original data already has a date/time column with multiple periods.
-  Keep the follow-up query simple and use exact column names.
+  Only skip step (b) if the original data already contains a date/time column with multiple periods.
+  If the enrichment query returns an error or empty rows, silently ignore it and proceed to Step 3
+  using the original data only — never write "No data available" or mention the failed query.
 
-Step 3 — after the enrichment query returns, write exactly 3 bullet points using the • character.
-  Use BOTH the original data AND the enrichment query results to tell a story.
+Step 3 — write exactly 3 bullet points using the • character.
+  Use the enrichment query results if available, otherwise use the original data.
   First, identify the best narrative frame:
   - Time        : lead with the trend arc (growth, peak, decline) using specific months and numbers
   - Contrast    : find the biggest divergence between categories over time, name both sides
-  - Outlier     : one category moved very differently from the rest — call it out with numbers
-  - Distribution: how concentration shifted over time (e.g. one method grew from 20% to 45%)
+  - Outlier     : one category moved very differently from the rest — quantify the gap
+  - Near-parity : if top values are within 5% of each other, that IS the story — tight competition,
+                  who is gaining ground, who is losing it
 
   Structure your 3 bullets so they build on each other:
   • bullet 1 — headline: the most important trend or shift, with specific numbers and time period
-  • bullet 2 — story beat: what explains or contrasts with bullet 1 (another category, a turning point)
+  • bullet 2 — story beat: what explains or contrasts with bullet 1 (a turning point, a rival gaining ground)
   • bullet 3 — hook: one concrete question or angle the user should explore next
 
   Rules:
-  - Interpret the data, don't just report it ("Card payments surged 40% in Q2" not "Card was highest in Q2")
-  - Use specific numbers and time references from both queries
+  - Interpret the data, don't list it ("Himalaya led but Mamaearth closed the gap by 8Mn in Q4" not "Himalaya had highest revenue")
+  - Use specific numbers and time references wherever available
   - Maximum 25 words per bullet
   - No preamble — output only the 3 bullets
 """
@@ -216,7 +217,7 @@ class ChartAgent:
                 messages=messages,
                 tools=tools,
                 tool_choice="auto",
-                max_tokens=1024,
+                max_tokens=2048 if deep_insights else 1024,
             )
             msg = response.choices[0].message
 
