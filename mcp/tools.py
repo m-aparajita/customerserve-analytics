@@ -107,7 +107,7 @@ TOOL_DECLARATIONS: list[dict] = [
 
 # ── Tool implementations ──────────────────────────────────────────────────────
 
-_schema_cache: str | None = None
+_schema_cache: str | None = None  # populated lazily; excludes query_logs and scheduled_reports
 
 _TABLE_ICONS: dict[str, str] = {
     "orders": "🛒",
@@ -125,7 +125,7 @@ def get_schema() -> str:
         tables = [r[0] for r in conn.execute("SHOW TABLES").fetchall()]
         schema: dict = {}
         for tbl in tables:
-            if tbl == "query_logs":
+            if tbl in ("query_logs", "scheduled_reports"):
                 continue
             cols = conn.execute(f"DESCRIBE {tbl}").fetchall()
             count = conn.execute(f"SELECT COUNT(*) FROM {tbl}").fetchone()[0]

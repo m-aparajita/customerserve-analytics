@@ -9,10 +9,13 @@ Responsibilities:
 """
 
 import json
+import logging
 import os
 
 from groq import Groq
 from dotenv import load_dotenv
+
+logger = logging.getLogger(__name__)
 
 from auth.roles import Role
 from mcp.tools import TOOL_DECLARATIONS, dispatch
@@ -156,7 +159,7 @@ _DEEP_EXTRA_TOOLS = [
         "type": "function",
         "function": {
             "name": "get_schema",
-            "description": "Return table names, column names, and data types. Call this before query_database if you are unsure of exact column names.",
+            "description": "Return exact table names, column names, and data types. Always call this before query_database to confirm the correct column names to use in your SQL.",
             "parameters": {"type": "object", "properties": {}},
         },
     },
@@ -164,7 +167,7 @@ _DEEP_EXTRA_TOOLS = [
         "type": "function",
         "function": {
             "name": "query_database",
-            "description": "Run a follow-up SQL SELECT to fetch the time trend or comparison dimension missing from the original data.",
+            "description": "Run a follow-up SQL SELECT to fetch the time trend or category breakdown that enriches the original data. Use column names confirmed by get_schema.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -210,8 +213,9 @@ class ChartAgent:
 
         chart_json: str | None = None
         insights:   str | None = None
+        _debug_lines: list[str] = []  # temporary; remove after debugging
 
-        for _ in range(max_rounds):
+        for round_num in range(max_rounds):
             response = self._client.chat.completions.create(
                 model=_MODEL_NAME,
                 messages=messages,
@@ -237,8 +241,14 @@ class ChartAgent:
             messages.append(asst_entry)
 
             if not msg.tool_calls:
+                logger.info("[ChartAgent] round=%d deep=%s → no tool calls, writing insights", round_num, deep_insights)
                 insights = msg.content or None
                 break
+
+            tool_names = [c.function.name for c in msg.tool_calls]
+            logger.info("[ChartAgent] round=%d deep=%s → tools called: %s", round_num, deep_insights, tool_names)
+            if deep_insights:
+                _debug_lines.append(f"[round {round_num}] called: {', '.join(tool_names)}")
 
             for call in msg.tool_calls:
                 fn_name = call.function.name
@@ -252,12 +262,26 @@ class ChartAgent:
                     parsed = json.loads(result_str)
                     if "chart_json" in parsed:
                         chart_json = parsed["chart_json"]
+                elif fn_name == "query_database":
+                    parsed = json.loads(result_str)
+                    if "error" in parsed:
+                        logger.warning("[ChartAgent] query_database error: %s", parsed["error"])
+                        if deep_insights:
+                            _debug_lines.append(f"  query_database ERROR: {parsed['error']}")
+                    else:
+                        logger.info("[ChartAgent] query_database returned %d rows", parsed.get("row_count", 0))
+                        if deep_insights:
+                            _debug_lines.append(f"  query_database OK: {parsed.get('row_count', 0)} rows")
 
                 messages.append({
                     "role": "tool",
                     "tool_call_id": call.id,
                     "content": result_str,
                 })
+
+        if deep_insights and _debug_lines:
+            debug_block = "🔍 DEBUG (remove later):\n" + "\n".join(_debug_lines) + "\n\n"
+            insights = debug_block + (insights or "")
 
         return chart_json, insights
 

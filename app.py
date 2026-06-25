@@ -4,6 +4,7 @@ Single-column layout: heading → description → query → templates → respon
 Light theme with violet/cyan accent — works reliably with Gradio's default rendering.
 """
 
+import logging
 import os
 import tempfile
 import threading
@@ -11,6 +12,8 @@ from datetime import date as _date
 import gradio as gr
 import plotly.io as pio
 from dotenv import load_dotenv
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
 load_dotenv()
 
