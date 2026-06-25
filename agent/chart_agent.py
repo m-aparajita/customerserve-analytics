@@ -214,8 +214,27 @@ class ChartAgent:
         chart_json: str | None = None
         insights:   str | None = None
         _debug_lines: list[str] = []  # temporary; remove after debugging
+        _enrichment_done = False
 
         for round_num in range(max_rounds):
+            # In deep mode: if chart is built and schema was fetched but query_database
+            # still hasn't run, force it by injecting a reminder before the next LLM call.
+            if deep_insights and chart_json is not None and not _enrichment_done:
+                _called_so_far = {
+                    tc["function"]["name"]
+                    for m in messages if m.get("role") == "assistant"
+                    for tc in (m.get("tool_calls") or [])
+                }
+                if "get_schema" in _called_so_far and "query_database" not in _called_so_far:
+                    messages.append({
+                        "role": "user",
+                        "content": (
+                            "You have the schema. Now call query_database to fetch the "
+                            "time trend or monthly breakdown for these results. "
+                            "Do NOT write bullet points yet."
+                        ),
+                    })
+
             response = self._client.chat.completions.create(
                 model=_MODEL_NAME,
                 messages=messages,
@@ -263,6 +282,7 @@ class ChartAgent:
                     if "chart_json" in parsed:
                         chart_json = parsed["chart_json"]
                 elif fn_name == "query_database":
+                    _enrichment_done = True
                     parsed = json.loads(result_str)
                     if "error" in parsed:
                         logger.warning("[ChartAgent] query_database error: %s", parsed["error"])
