@@ -246,13 +246,13 @@ Round 2:  Receives chart confirmation   → writes 3 insight bullets
 
 **Deep insights mode** (max 6 rounds, 2048 tokens) — activated by UI checkbox:
 ```
-Round 1:  Receives rows + user question → calls build_chart()
-Round 2:  Receives chart confirmation   → calls get_schema() to confirm column names
-Round 3:  Receives schema              → calls query_database() for time/comparison dimension
-Round 4:  Receives enrichment rows     → writes 3 narrative insight bullets
+Round 1:  Receives rows + user question → calls build_chart() [+ get_schema() in parallel]
+          [Code check: if get_schema called but query_database not yet → inject user message]
+Round 2:  Forced by injected message   → calls query_database() for time/comparison dimension
+Round 3:  Receives enrichment rows     → writes 3 narrative insight bullets
           Loop exits → returns (chart_json, insights)
 ```
-Deep mode uses a completely separate system prompt (`_SYSTEM_PROMPT_DEEP`) with steps ordered correctly. Enrichment query errors are silently ignored — model falls back to original data.
+Deep mode uses a completely separate system prompt (`_SYSTEM_PROMPT_DEEP`). The model tends to call `build_chart` and `get_schema` together in round 1 then skip straight to bullets — the code detects this and injects a nudge before the next LLM call to force `query_database`. Enrichment errors are silently ignored; model falls back to original data.
 
 **Chart type selection rules:**
 - **line** — time-series or sequential data
@@ -503,6 +503,7 @@ These are gaps you should be ready to discuss in interviews:
 | **Static dataset** | Insights are not from live business data | Add a data ingestion pipeline (e.g. nightly CSV refresh from an S3 bucket) |
 | **Single-process / single-instance** | Cannot scale horizontally; one crash kills all users | Move to a queue-backed architecture (Celery + Redis) for the agent |
 | **No observability** | query_logs table exists but no dashboards or alerts | Add Grafana or a lightweight monitoring layer on top of query_logs |
+| **Deep insights enrichment** | Model may call `get_schema` and `build_chart` together then skip `query_database` — code-enforced nudge mitigates this but is a workaround for model non-compliance | Use `tool_choice` to enforce specific tool call order, or move enrichment into deterministic code rather than relying on the LLM to call it |
 | **LLM hallucination on SQL** | The model occasionally generates wrong column names or logic | Add a SQL validation step that runs EXPLAIN before execution |
 | **Groq free-tier limits** | Rate limits and monthly token caps can break the app silently | Add fallback error messaging and consider a paid tier for demos |
 | **No prompt versioning** | System prompt changes are not tracked or A/B tested | Store prompt versions in code and log which version was used per query |
@@ -512,7 +513,7 @@ These are gaps you should be ready to discuss in interviews:
 ## 14. Interview Talking Points
 
 **"Walk me through your architecture."**
-> Single-process Python app with a two-agent pipeline. Gradio handles UI and auth. A QueryAgent talks to Groq to write SQL and retrieve data. The rows are handed off to a ChartAgent, which independently decides the best visualisation and surfaces 3 narrative insight bullets structured as headline → story beat → exploration hook. There's also an optional deep insights mode where the ChartAgent runs a follow-up enrichment query to fetch the time or comparison dimension missing from the original result — activated by a checkbox in the UI. Everything runs in one Docker container on HuggingFace Spaces free tier.
+> Single-process Python app with a two-agent pipeline. Gradio handles UI and auth. A QueryAgent talks to Groq to write SQL and retrieve data. The rows are handed off to a ChartAgent, which independently decides the best visualisation and surfaces 3 narrative insight bullets structured as headline → story beat → exploration hook. There's also an optional deep insights mode where the ChartAgent runs a follow-up enrichment query — `get_schema` then `query_database` — to fetch the time or comparison dimension missing from the original result, producing richer narrative bullets. The model tends to bundle `get_schema` with `build_chart` and skip the enrichment query, so the code detects that pattern and injects a prompt nudge to force it. Everything runs in one Docker container on HuggingFace Spaces free tier.
 
 **"Why two agents instead of one?"**
 > QueryAgent and ChartAgent have genuinely different skills. QueryAgent needs to reason about schema, write correct SQL, and understand business intent. ChartAgent needs to understand visual storytelling — which chart type fits the data shape, which narrative frame (time trend, contrast, outlier, near-parity) best tells the story, and what to explore next. Separating them means each has a focused system prompt, a minimal tool set, and can be tuned or swapped independently. In production, ChartAgent could run on a smaller, cheaper model since chart selection is a simpler task than SQL generation.
