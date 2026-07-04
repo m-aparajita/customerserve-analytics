@@ -578,10 +578,15 @@ def build_ui():
         )
 
         # 3a ── Ask Aloud — voice input (Groq Whisper STT)
+        # editable/show_download_button/show_share_button=False strip the
+        # trim, download and share tools, leaving record/stop + play + clear (x).
         voice_input = gr.Audio(
             sources=["microphone"],
             type="filepath",
             label="🎤 Ask Aloud — record your question",
+            editable=False,
+            show_download_button=False,
+            show_share_button=False,
         )
 
         # 3b ── Deep insights toggle
