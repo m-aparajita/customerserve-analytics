@@ -22,6 +22,7 @@ from database.scheduler import save_schedule, get_due_schedules, mark_sent
 from mcp.tools import get_schema, get_schema_html
 from agent.gemini_agent import get_agent
 from agent.chart_agent import get_chart_agent
+from agent.voice import transcribe_audio
 from auth.manager import get_role, gradio_auth_pairs
 from auth.roles import VIEWER_TEMPLATES, Role, PERMISSIONS
 from mailer.sender import send_email
@@ -458,7 +459,11 @@ def respond(message: str, history: list, deep_insights: bool, request: gr.Reques
         {"role": "user",      "content": message},
         {"role": "assistant", "content": text},
     ]
-    return "", history, fig, chart_download, insights_update, schedule_update, message, png_path_val, raw_insights
+    return "", history, fig, chart_download, insights_update, schedule_update, message, png_path_val, raw_insights, text
+
+
+def voice_to_text(audio_path: str) -> str:
+    return transcribe_audio(audio_path)
 
 
 def schedule_report(
@@ -572,6 +577,13 @@ def build_ui():
             max_lines=8,
         )
 
+        # 3a ── Ask Aloud — voice input (Groq Whisper STT)
+        voice_input = gr.Audio(
+            sources=["microphone"],
+            type="filepath",
+            label="🎤 Ask Aloud — record your question",
+        )
+
         # 3b ── Deep insights toggle
         deep_insights_chk = gr.Checkbox(
             label="Want me to include related insights?",
@@ -614,10 +626,14 @@ def build_ui():
         # 9 ── Key Insights (hidden until ChartAgent returns analysis)
         insights_box = gr.HTML(value="", visible=False)
 
+        # 9b ── Listen to the answer — browser speechSynthesis (client-side, no API call)
+        listen_btn = gr.Button("🔊 Listen to answer", size="sm")
+
         # 10 ── Hidden state: carry current question / png / insights into schedule handler
         current_question = gr.State("")
         current_png      = gr.State("")
         current_insights = gr.State("")
+        current_answer   = gr.State("")
 
         # 11 ── Schedule panel (revealed after a chart is rendered)
         with gr.Accordion(
@@ -659,9 +675,31 @@ def build_ui():
         _respond_outputs = [
             msg_box, chatbot, chart_output, download_btn, insights_box,
             schedule_panel, current_question, current_png, current_insights,
+            current_answer,
         ]
         send_btn.click(fn=respond, inputs=[msg_box, chatbot, deep_insights_chk], outputs=_respond_outputs)
         msg_box.submit(fn=respond, inputs=[msg_box, chatbot, deep_insights_chk], outputs=_respond_outputs)
+
+        # Ask Aloud: transcribe recorded speech into the query box, then run
+        # the same respond() pipeline used for typed input — no bypass path.
+        voice_input.stop_recording(
+            fn=voice_to_text, inputs=[voice_input], outputs=[msg_box]
+        ).then(
+            fn=respond, inputs=[msg_box, chatbot, deep_insights_chk], outputs=_respond_outputs
+        )
+
+        # Listen to answer: browser speechSynthesis, client-side only, no API call.
+        listen_btn.click(
+            fn=None,
+            inputs=[current_answer],
+            outputs=None,
+            js="""(text) => {
+                if (!text) { return; }
+                window.speechSynthesis.cancel();
+                const utterance = new SpeechSynthesisUtterance(text);
+                window.speechSynthesis.speak(utterance);
+            }""",
+        )
 
         def _on_freq_change(freq):
             show_days  = freq in ("Weekly", "Bi-weekly")
