@@ -44,6 +44,8 @@ Step 2 — call build_chart immediately. Use EXACT column names from the data.
     x_col      : exact column name for the X axis (or pie labels)
     y_col      : exact column name for the Y axis (or pie values)
     title      : short descriptive title (e.g. "Monthly Revenue 2024")
+  x_col and y_col must be two DIFFERENT columns (unless chart_type is histogram) — x_col is
+  the category/label column, y_col is the numeric value column. Never repeat the same column.
   Do NOT include a data parameter — the rows are injected automatically.
 
 Step 3 — after the tool returns, write exactly 3 bullet points using the • character.
@@ -82,6 +84,8 @@ Step 2 — call build_chart immediately. Use EXACT column names from the data.
     x_col      : exact column name for the X axis (or pie labels)
     y_col      : exact column name for the Y axis (or pie values)
     title      : short descriptive title (e.g. "Monthly Revenue 2024")
+  x_col and y_col must be two DIFFERENT columns (unless chart_type is histogram) — x_col is
+  the category/label column, y_col is the numeric value column. Never repeat the same column.
   Do NOT include a data parameter — the rows are injected automatically.
 
 Step 2.5 — ENRICHMENT (mandatory — do this before writing any bullets).

@@ -291,6 +291,14 @@ def build_chart(data: list, chart_type: str, x_col: str, y_col: str,
     if x_col not in df.columns or (chart_type != "histogram" and y_col not in df.columns):
         return json.dumps({"error": f"Column '{x_col}' or '{y_col}' not found in data."})
 
+    if chart_type != "histogram" and x_col == y_col:
+        # The model picked the same column for both axes — fall back to another
+        # numeric column so the chart isn't garbage instead of just erroring out.
+        candidates = [c for c in df.columns if c != x_col and pd.api.types.is_numeric_dtype(df[c])]
+        if not candidates:
+            return json.dumps({"error": "x_col and y_col must be different columns."})
+        y_col = candidates[0]
+
     df[x_col] = df[x_col].fillna("(Unknown)")
 
     # Colours that read clearly on a light/white background
