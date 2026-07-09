@@ -18,7 +18,7 @@ Natural-language analytics over retail order data. QueryAgent writes SQL → Duc
 | Scheduler | `database/scheduler.py` — CRUD for `scheduled_reports`; triggered on page load |
 | DB | `database/` — DuckDB in-process; tables: `orders`, `order_items`, `products`, `query_logs`, `scheduled_reports` |
 | Auth/Guardrails | `auth/`, `guardrails/` — RBAC roles; Layers 1 (input), 2 (prompt), 3 (SQL) |
-| Voice ("Ask Aloud") | `agent/voice.py` — STT only, `transcribe_audio()` via Groq `whisper-large-v3-turbo`; feeds transcribed text into the same `respond()` pipeline as typed input |
+| Voice ("Ask Aloud") | `agent/voice.py` — STT via Groq `whisper-large-v3-turbo`; `app.py` — TTS via browser `speechSynthesis`; mic feeds transcribed text into the same `respond()` pipeline as typed input |
 
 ---
 
@@ -34,8 +34,9 @@ Natural-language analytics over retail order data. QueryAgent writes SQL → Duc
 - **System prompt:** keep short; model calls `get_schema` tool rather than embedding schema JSON.
 - **Email:** Resend v1.x (`resend.api_key` + `resend.Emails.send()`). Do not upgrade to v2.
 - **DB path:** `DB_PATH` env var → `/app/Data/customerserve.duckdb` in Docker.
-- **Voice input (STT):** Groq `whisper-large-v3-turbo`, reuses `GROQ_API_KEY`. Free tier confirmed (no card): 2,000 req/day, 7,200 audio-sec/hour. Transcribed text is not a separate trust boundary — it passes through the same guardrails/RBAC as typed input, no bypass path.
-- **Voice output (TTS):** browser `speechSynthesis` (client-side JS in `app.py`), not a Groq API. Groq's TTS (PlayAI/Orpheus) is priced per character with no confirmed free tier — deliberately avoided. Zero new dependencies or Docker changes.
+- **Voice:** STT via Groq `whisper-large-v3-turbo` (reuses `GROQ_API_KEY`; free tier 2,000 req/day, 7,200 audio-sec/hr) — transcribed text is not a separate trust boundary, same guardrails/RBAC as typed input. TTS via browser `speechSynthesis`, client-side JS, zero new deps — Groq's paid per-character TTS deliberately avoided. Mic widget: `editable=False`, download/share hidden — record/stop, play, clear (x) only.
+- **`products` has no name column:** only `product_id`, `brand`, `category`, `sub_category`, `mrp`. System prompt tells QueryAgent to group/label generic "products" questions by `brand`, not raw `product_id`.
+- **`build_chart` axis guard:** if the model passes the same column for `x_col`/`y_col` (occasional Groq mistake), code auto-swaps `y_col` to another numeric column rather than rendering a broken chart.
 
 ## RBAC
 

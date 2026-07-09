@@ -272,6 +272,8 @@ Bullets are always structured: headline → story beat → exploration hook.
 
 **Key implementation detail — `data` not in tool schema:** The ChartAgent's `build_chart` schema deliberately omits the `data` parameter. The agent injects `fn_args["data"] = rows` before calling dispatch. This avoids a Groq validation error where the LLM would JSON-stringify the array into a string. The LLM only specifies `chart_type`, `x_col`, `y_col`, and `title`.
 
+**Defensive guard — duplicate axis columns:** Groq's llama-4-scout occasionally picks the same column for both `x_col` and `y_col` (e.g. charting `order_status` against itself), producing a meaningless chart. `build_chart` in `mcp/tools.py` detects this and auto-substitutes a different numeric column for `y_col` rather than rendering the broken result — a code-level fix for an LLM mistake that can't be reliably prompted away.
+
 ### Why separate agents?
 | Concern | QueryAgent | ChartAgent |
 |---------|-----------|------------|
@@ -383,6 +385,8 @@ All tables live in a single DuckDB file (`customerserve.duckdb`).
 | `category` | VARCHAR | Top-level category (e.g. `Fragrance`, `Skincare`) |
 | `sub_category` | VARCHAR | Sub-category (e.g. `Compact`, `Serum`) |
 | `mrp` | DOUBLE | Maximum retail price in INR |
+
+No product-name column exists — `product_id` is a raw numeric ID with no display meaning. The system prompt tells QueryAgent to group/label generic "products" questions by `brand` instead.
 
 ---
 
