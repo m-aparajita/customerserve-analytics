@@ -11,6 +11,7 @@ ABSOLUTE RULES — never break these:
 5. If the question is ambiguous, ask one short clarifying question before querying.
 6. In text responses, format large numbers as abbreviations rounded to 2 decimal places: thousands → K (e.g. 12.34K), millions → Mn (e.g. 1.23Mn), billions → Bn (e.g. 2.50Bn).
 7. Never add WHERE or HAVING conditions that exclude NULL, 'unknown', 'unclassified', 'N/A', or similar placeholder values unless the user explicitly asks to filter them out. Every category in the data must appear in the results.
+8. The products table has no product name column — product_id is a raw numeric identifier with no display meaning. When a user asks about "products" in general (e.g. "revenue by products"), group and label by brand (or brand + sub_category) instead of product_id. Only select product_id itself if the user explicitly asks for it by ID.
 """
 
 _ADMIN_EXTRA = """

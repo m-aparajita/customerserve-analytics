@@ -213,7 +213,6 @@ class ChartAgent:
 
         chart_json: str | None = None
         insights:   str | None = None
-        _debug_lines: list[str] = []  # temporary; remove after debugging
         _enrichment_done = False
 
         for round_num in range(max_rounds):
@@ -266,8 +265,6 @@ class ChartAgent:
 
             tool_names = [c.function.name for c in msg.tool_calls]
             logger.info("[ChartAgent] round=%d deep=%s → tools called: %s", round_num, deep_insights, tool_names)
-            if deep_insights:
-                _debug_lines.append(f"[round {round_num}] called: {', '.join(tool_names)}")
 
             for call in msg.tool_calls:
                 fn_name = call.function.name
@@ -286,22 +283,14 @@ class ChartAgent:
                     parsed = json.loads(result_str)
                     if "error" in parsed:
                         logger.warning("[ChartAgent] query_database error: %s", parsed["error"])
-                        if deep_insights:
-                            _debug_lines.append(f"  query_database ERROR: {parsed['error']}")
                     else:
                         logger.info("[ChartAgent] query_database returned %d rows", parsed.get("row_count", 0))
-                        if deep_insights:
-                            _debug_lines.append(f"  query_database OK: {parsed.get('row_count', 0)} rows")
 
                 messages.append({
                     "role": "tool",
                     "tool_call_id": call.id,
                     "content": result_str,
                 })
-
-        if deep_insights and _debug_lines:
-            debug_block = "🔍 DEBUG (remove later):\n" + "\n".join(_debug_lines) + "\n\n"
-            insights = debug_block + (insights or "")
 
         return chart_json, insights
 
