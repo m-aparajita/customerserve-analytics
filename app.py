@@ -177,7 +177,12 @@ button:not(.primary):hover {
 }
 .heading-row > *:first-child { flex: 1 1 auto !important; min-width: 0 !important; }
 .heading-row > *:last-child { flex: 0 0 auto !important; padding-top: 0.35rem !important; }
-.role-badge-btn, .role-badge-btn button {
+/* Hard-reset Gradio's button chrome so the badge looks identical to a plain pill */
+.role-badge-btn, .role-badge-btn > button {
+    all: unset !important;
+    cursor: pointer !important;
+    display: inline-block !important;
+    box-sizing: border-box !important;
     background: linear-gradient(135deg,#7c3aed,#0891b2) !important;
     color: #ffffff !important;
     padding: 5px 16px !important;
@@ -187,10 +192,47 @@ button:not(.primary):hover {
     font-family: 'Inter', sans-serif !important;
     letter-spacing: 0.05em !important;
     box-shadow: 0 2px 10px rgba(124,58,237,0.30) !important;
-    border: none !important;
-    width: auto !important;
-    min-width: unset !important;
+    text-align: center !important;
 }
+.role-badge-btn:hover, .role-badge-btn > button:hover { filter: brightness(1.08) !important; }
+
+/* ── LLM call log popup ── */
+.llm-modal-overlay {
+    position: fixed !important;
+    inset: 0 !important;
+    background: rgba(30,27,75,0.55) !important;
+    z-index: 1000 !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    padding: 1.5rem !important;
+}
+.llm-modal-box {
+    background: #ffffff !important;
+    border-radius: 1rem !important;
+    padding: 1.5rem !important;
+    max-width: 680px !important;
+    width: 100% !important;
+    max-height: 80vh !important;
+    overflow-y: auto !important;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.35) !important;
+}
+.llm-modal-header { display: flex !important; justify-content: space-between !important; align-items: center !important; }
+.llm-modal-title {
+    font-family: 'Space Grotesk', sans-serif !important;
+    font-weight: 700 !important;
+    color: #3b0764 !important;
+    font-size: 1.05rem !important;
+}
+.llm-modal-close, .llm-modal-close > button {
+    all: unset !important;
+    cursor: pointer !important;
+    color: #6b7280 !important;
+    font-size: 1.3rem !important;
+    line-height: 1 !important;
+    padding: 0.2rem 0.5rem !important;
+}
+.llm-modal-close:hover, .llm-modal-close > button:hover { color: #1e1b4b !important; }
 
 /* ── Schema accordion ── */
 .schema-ref > .label-wrap > span {
@@ -625,7 +667,7 @@ def toggle_llm_log(request: gr.Request) -> tuple:
     if not PERMISSIONS[role].can_see_logs:
         return gr.update(), gr.update()
     calls = call_log.get_calls(request.username)
-    return gr.update(visible=True, open=True), gr.update(value=_format_llm_log(calls))
+    return gr.update(visible=True), gr.update(value=_format_llm_log(calls))
 
 
 # ── Layout ────────────────────────────────────────────────────────────────────
@@ -655,14 +697,13 @@ def build_ui():
         ) as schema_accordion:
             schema_panel = gr.HTML("")
 
-        # 2a ── LLM call log (Admin only; hidden until role badge is clicked)
-        with gr.Accordion(
-            "🔧  LLM Call Log — model, rounds, and token usage this session",
-            open=False,
-            visible=False,
-            elem_classes=["schema-ref"],
-        ) as llm_log_accordion:
-            llm_log_panel = gr.HTML("")
+        # 2a ── LLM call log popup (Admin only; opened by clicking the role badge)
+        with gr.Column(visible=False, elem_classes=["llm-modal-overlay"]) as llm_log_modal:
+            with gr.Column(elem_classes=["llm-modal-box"]):
+                with gr.Row(elem_classes=["llm-modal-header"]):
+                    gr.HTML("<span class='llm-modal-title'>🔧 LLM Call Log — this session</span>")
+                    llm_log_close_btn = gr.Button("✕", elem_classes=["llm-modal-close"])
+                llm_log_panel = gr.HTML("")
 
         # 3 ── Query input
         msg_box = gr.Textbox(
@@ -833,7 +874,10 @@ def build_ui():
         demo.load(fn=build_schema_panel, outputs=[schema_accordion, schema_panel])
 
         role_badge_btn.click(
-            fn=toggle_llm_log, outputs=[llm_log_accordion, llm_log_panel]
+            fn=toggle_llm_log, outputs=[llm_log_modal, llm_log_panel]
+        )
+        llm_log_close_btn.click(
+            fn=lambda: gr.update(visible=False), outputs=[llm_log_modal]
         )
 
     return demo
