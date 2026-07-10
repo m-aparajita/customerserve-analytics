@@ -168,7 +168,15 @@ button:not(.primary):hover {
 }
 
 /* ── Role badge (click to open LLM call log) ── */
-.heading-row { align-items: flex-start !important; }
+.heading-row {
+    display: flex !important;
+    justify-content: space-between !important;
+    align-items: flex-start !important;
+    flex-wrap: nowrap !important;
+    gap: 0.75rem !important;
+}
+.heading-row > *:first-child { flex: 1 1 auto !important; min-width: 0 !important; }
+.heading-row > *:last-child { flex: 0 0 auto !important; padding-top: 0.35rem !important; }
 .role-badge-btn, .role-badge-btn button {
     background: linear-gradient(135deg,#7c3aed,#0891b2) !important;
     color: #ffffff !important;
@@ -635,8 +643,8 @@ def build_ui():
 
         # 1 ── Heading + description + role badge
         with gr.Row(elem_classes=["heading-row"]):
-            heading = gr.HTML(value=_heading_html(), scale=4)
-            role_badge_btn = gr.Button("", elem_classes=["role-badge-btn"], scale=1, visible=False)
+            heading = gr.HTML(value=_heading_html())
+            role_badge_btn = gr.Button("", elem_classes=["role-badge-btn"], visible=False)
 
         # 2 ── Schema reference accordion (ADMIN / ANALYST only; hidden until load)
         with gr.Accordion(
