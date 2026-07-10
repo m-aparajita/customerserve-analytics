@@ -197,15 +197,19 @@ button:not(.primary):hover {
 .role-badge-btn:hover, .role-badge-btn > button:hover { filter: brightness(1.08) !important; }
 
 /* ── LLM call log popup ──
-   Note: no !important on display — Gradio hides this component via an
-   inline `display:none` when visible=False, and an !important here would
-   permanently override that and leave the overlay stuck open. */
-.llm-modal-overlay {
+   The component itself stays visible=True at the Gradio level at all
+   times — fighting Gradio's own show/hide CSS for this component kept
+   losing (it stayed permanently open). Instead, the overlay is display:none
+   by default in OUR css and we toggle a second class (llm-modal-open) via
+   elem_classes to show/hide it, so we own the entire show/hide state and
+   never compete with Gradio's internal mechanism. */
+.llm-modal-overlay { display: none; }
+.llm-modal-overlay.llm-modal-open {
+    display: flex !important;
     position: fixed !important;
     inset: 0 !important;
     background: rgba(30,27,75,0.55) !important;
     z-index: 1000 !important;
-    display: flex;
     align-items: center !important;
     justify-content: center !important;
     padding: 1.5rem !important;
@@ -670,7 +674,10 @@ def toggle_llm_log(request: gr.Request) -> tuple:
     if not PERMISSIONS[role].can_see_logs:
         return gr.update(), gr.update()
     calls = call_log.get_calls(request.username)
-    return gr.update(visible=True), gr.update(value=_format_llm_log(calls))
+    return (
+        gr.update(elem_classes=["llm-modal-overlay", "llm-modal-open"]),
+        gr.update(value=_format_llm_log(calls)),
+    )
 
 
 # ── Layout ────────────────────────────────────────────────────────────────────
@@ -701,7 +708,9 @@ def build_ui():
             schema_panel = gr.HTML("")
 
         # 2a ── LLM call log popup (Admin only; opened by clicking the role badge)
-        with gr.Column(visible=False, elem_classes=["llm-modal-overlay"]) as llm_log_modal:
+        # Stays visible=True at the Gradio level always — open/closed is purely
+        # the llm-modal-open CSS class, toggled via elem_classes (see CSS above).
+        with gr.Column(visible=True, elem_classes=["llm-modal-overlay"]) as llm_log_modal:
             with gr.Column(elem_classes=["llm-modal-box"]):
                 with gr.Row(elem_classes=["llm-modal-header"]):
                     gr.HTML("<span class='llm-modal-title'>🔧 LLM Call Log — this session</span>")
@@ -880,7 +889,7 @@ def build_ui():
             fn=toggle_llm_log, outputs=[llm_log_modal, llm_log_panel]
         )
         llm_log_close_btn.click(
-            fn=lambda: gr.update(visible=False), outputs=[llm_log_modal]
+            fn=lambda: gr.update(elem_classes=["llm-modal-overlay"]), outputs=[llm_log_modal]
         )
 
     return demo
