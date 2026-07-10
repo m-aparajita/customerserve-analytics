@@ -177,24 +177,24 @@ button:not(.primary):hover {
 }
 .heading-row > *:first-child { flex: 1 1 auto !important; min-width: 0 !important; }
 .heading-row > *:last-child { flex: 0 0 auto !important; padding-top: 0.35rem !important; }
-/* Hard-reset Gradio's button chrome so the badge looks identical to a plain pill */
-.role-badge-btn, .role-badge-btn > button {
-    all: unset !important;
-    cursor: pointer !important;
-    display: inline-block !important;
-    box-sizing: border-box !important;
+/* Small pill badge — rely on Gradio's own size="sm" for compact sizing
+   (a full all:unset reset kept losing to Gradio's default button box
+   model, leaving an oversized primary-button-shaped element), and only
+   override colour/shape here. Descendant (not direct-child) selector so
+   it matches regardless of how deep Gradio nests the real <button>. */
+.role-badge-btn, .role-badge-btn button {
     background: linear-gradient(135deg,#7c3aed,#0891b2) !important;
     color: #ffffff !important;
-    padding: 5px 16px !important;
+    border: none !important;
     border-radius: 999px !important;
-    font-size: 0.78rem !important;
     font-weight: 700 !important;
-    font-family: 'Inter', sans-serif !important;
     letter-spacing: 0.05em !important;
     box-shadow: 0 2px 10px rgba(124,58,237,0.30) !important;
-    text-align: center !important;
+    min-width: unset !important;
+    width: auto !important;
+    flex-grow: 0 !important;
 }
-.role-badge-btn:hover, .role-badge-btn > button:hover { filter: brightness(1.08) !important; }
+.role-badge-btn:hover, .role-badge-btn button:hover { filter: brightness(1.08) !important; }
 
 /* ── LLM call log popup ──
    The component itself stays visible=True at the Gradio level at all
@@ -696,7 +696,10 @@ def build_ui():
         # 1 ── Heading + description + role badge
         with gr.Row(elem_classes=["heading-row"]):
             heading = gr.HTML(value=_heading_html())
-            role_badge_btn = gr.Button("", elem_classes=["role-badge-btn"], visible=False)
+            role_badge_btn = gr.Button(
+                "", elem_classes=["role-badge-btn"], visible=False,
+                size="sm", variant="secondary",
+            )
 
         # 2 ── Schema reference accordion (ADMIN / ANALYST only; hidden until load)
         with gr.Accordion(
