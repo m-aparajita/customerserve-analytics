@@ -20,6 +20,7 @@ load_dotenv()
 from database.setup import setup_database
 from database.scheduler import save_schedule, get_due_schedules, mark_sent
 from mcp.tools import get_schema, get_schema_html
+from agent import call_log
 from agent.gemini_agent import get_agent
 from agent.chart_agent import get_chart_agent
 from agent.voice import transcribe_audio
@@ -166,6 +167,23 @@ button:not(.primary):hover {
     box-shadow: none !important;
 }
 
+/* ── Role badge (click to open LLM call log) ── */
+.heading-row { align-items: flex-start !important; }
+.role-badge-btn, .role-badge-btn button {
+    background: linear-gradient(135deg,#7c3aed,#0891b2) !important;
+    color: #ffffff !important;
+    padding: 5px 16px !important;
+    border-radius: 999px !important;
+    font-size: 0.78rem !important;
+    font-weight: 700 !important;
+    font-family: 'Inter', sans-serif !important;
+    letter-spacing: 0.05em !important;
+    box-shadow: 0 2px 10px rgba(124,58,237,0.30) !important;
+    border: none !important;
+    width: auto !important;
+    min-width: unset !important;
+}
+
 /* ── Schema accordion ── */
 .schema-ref > .label-wrap > span {
     font-size: 0.72rem !important;
@@ -206,46 +224,75 @@ button:not(.primary):hover {
 
 # ── Static HTML blocks ────────────────────────────────────────────────────────
 
-def _heading_html(username: str = "", role_label: str = "") -> str:
-    badge = ""
-    if username:
-        badge = (
-            f"<span style='"
-            f"background:linear-gradient(135deg,#7c3aed,#0891b2);"
-            f"color:#ffffff;"
-            f"padding:5px 16px;border-radius:999px;"
-            f"font-size:0.78rem;font-weight:700;"
-            f"font-family:Inter,sans-serif;letter-spacing:0.05em;"
-            f"box-shadow:0 2px 10px rgba(124,58,237,0.30);'>"
-            f"{username}&nbsp;·&nbsp;{role_label}"
-            f"</span>"
-        )
-    return f"""
-<div style="display:flex;justify-content:space-between;align-items:flex-start;
-            padding:1.25rem 0 0.5rem;">
-  <div>
-    <h1 style="font-family:'Space Grotesk',sans-serif;
-               font-size:clamp(1.8rem,4vw,2.6rem);
-               font-weight:700;
-               letter-spacing:-0.025em;
-               line-height:1.15;
-               margin:0 0 0.55rem;
-               color:#3b0764;">
-      Order Insights
-    </h1>
-    <p style="font-size:0.92rem;
-              color:#374151;
-              line-height:1.65;
-              margin:0;
-              max-width:560px;
-              font-family:Inter,sans-serif;">
-      Ask questions in plain English — get instant charts and insights, and schedule email reports.
-    </p>
-  </div>
-  <div style="flex-shrink:0;padding-top:0.35rem;">{badge}</div>
+def _heading_html() -> str:
+    return """
+<div style="padding:1.25rem 0 0.5rem;">
+  <h1 style="font-family:'Space Grotesk',sans-serif;
+             font-size:clamp(1.8rem,4vw,2.6rem);
+             font-weight:700;
+             letter-spacing:-0.025em;
+             line-height:1.15;
+             margin:0 0 0.55rem;
+             color:#3b0764;">
+    Order Insights
+  </h1>
+  <p style="font-size:0.92rem;
+            color:#374151;
+            line-height:1.65;
+            margin:0;
+            max-width:560px;
+            font-family:Inter,sans-serif;">
+    Ask questions in plain English — get instant charts and insights, and schedule email reports.
+  </p>
 </div>
 <hr style="border:none;border-top:2px solid #ede9fe;margin:0.5rem 0 0;">
 """
+
+
+def _format_llm_log(calls: list[dict]) -> str:
+    if not calls:
+        return (
+            "<p style='margin:0.5rem 0;font-size:0.85rem;color:#9ca3af;"
+            "font-family:Inter,sans-serif;'>No LLM calls yet this session — run a query first.</p>"
+        )
+    headers = [("Time", "left"), ("Agent", "left"), ("Rd", "center"), ("Model", "left"),
+               ("Msgs", "center"), ("Prompt", "right"), ("Compl.", "right"), ("Total", "right")]
+    head_html = "".join(
+        f"<th style='text-align:{align};font-size:0.65rem;text-transform:uppercase;"
+        f"letter-spacing:0.08em;color:#9ca3af;padding:0 10px 5px 0;font-weight:600;"
+        f"border-bottom:1px solid #ede9fe;'>{label}</th>"
+        for label, align in headers
+    )
+    rows_html = "".join(
+        "<tr>"
+        f"<td style='padding:3px 10px 3px 0;color:#6b7280;font-size:0.72rem;"
+        f"font-family:\"Courier New\",monospace;white-space:nowrap;'>{c['time']}</td>"
+        f"<td style='padding:3px 10px 3px 0;color:#5b21b6;font-size:0.75rem;"
+        f"font-weight:600;font-family:Inter,sans-serif;white-space:nowrap;'>"
+        f"{c['agent']}{' (deep)' if c['deep'] else ''}</td>"
+        f"<td style='padding:3px 10px 3px 0;color:#1e1b4b;font-size:0.75rem;"
+        f"text-align:center;'>{c['round']}</td>"
+        f"<td style='padding:3px 10px 3px 0;color:#1e1b4b;font-size:0.72rem;"
+        f"font-family:monospace;white-space:nowrap;'>{c['model'].split('/')[-1]}</td>"
+        f"<td style='padding:3px 10px 3px 0;color:#1e1b4b;font-size:0.75rem;"
+        f"text-align:center;'>{c['messages']}</td>"
+        f"<td style='padding:3px 10px 3px 0;color:#1e1b4b;font-size:0.75rem;"
+        f"text-align:right;'>{c['prompt_tokens'] if c['prompt_tokens'] is not None else '—'}</td>"
+        f"<td style='padding:3px 10px 3px 0;color:#1e1b4b;font-size:0.75rem;"
+        f"text-align:right;'>{c['completion_tokens'] if c['completion_tokens'] is not None else '—'}</td>"
+        f"<td style='padding:3px 0;color:#1e1b4b;font-size:0.75rem;font-weight:700;"
+        f"text-align:right;'>{c['total_tokens'] if c['total_tokens'] is not None else '—'}</td>"
+        "</tr>"
+        for c in reversed(calls)
+    )
+    return (
+        "<div style='max-height:320px;overflow-y:auto;'>"
+        f"<table style='border-collapse:collapse;width:100%;'>"
+        f"<thead><tr>{head_html}</tr></thead><tbody>{rows_html}</tbody></table></div>"
+        f"<p style='margin:0.6rem 0 0;font-size:0.72rem;color:#9ca3af;font-family:Inter,sans-serif;'>"
+        f"Showing last {len(calls)} call(s) this session, most recent first · "
+        f"click your role badge again to refresh.</p>"
+    )
 
 _TPL_HEADING = """
 <p style="font-size:0.70rem;font-weight:600;text-transform:uppercase;
@@ -308,6 +355,7 @@ def _run_due_schedules() -> None:
                         columns=query_result["columns"],
                         user_question=sched["question"],
                         role=role,
+                        username=sched["username"],
                     )
                     if chart_json:
                         fig = pio.from_json(chart_json)
@@ -417,6 +465,7 @@ def respond(message: str, history: list, deep_insights: bool, request: gr.Reques
             deep_insights=deep_insights,
             user_question=message,
             role=role,
+            username=username,
         )
         raw_insights = insights or ""
 
@@ -551,12 +600,24 @@ def build_schema_panel(request: gr.Request) -> tuple:
     return gr.update(visible=True), gr.update(value=get_schema_html())
 
 
-def build_heading(request: gr.Request) -> str:
+def build_heading(request: gr.Request) -> tuple:
     threading.Thread(target=_run_due_schedules, daemon=True).start()
     if not request or not request.username:
-        return _heading_html()
+        return _heading_html(), gr.update(visible=False)
     role = get_role(request.username)
-    return _heading_html(request.username, role.value.upper())
+    label = f"{request.username} · {role.value.upper()}"
+    return _heading_html(), gr.update(value=label, visible=True)
+
+
+def toggle_llm_log(request: gr.Request) -> tuple:
+    """Reveal (and refresh) the LLM call log — Admin only, click role badge again to refresh."""
+    if not request or not request.username:
+        return gr.update(), gr.update()
+    role = get_role(request.username)
+    if not PERMISSIONS[role].can_see_logs:
+        return gr.update(), gr.update()
+    calls = call_log.get_calls(request.username)
+    return gr.update(visible=True, open=True), gr.update(value=_format_llm_log(calls))
 
 
 # ── Layout ────────────────────────────────────────────────────────────────────
@@ -573,7 +634,9 @@ def build_ui():
     ) as demo:
 
         # 1 ── Heading + description + role badge
-        heading = gr.HTML(value=_heading_html())
+        with gr.Row(elem_classes=["heading-row"]):
+            heading = gr.HTML(value=_heading_html(), scale=4)
+            role_badge_btn = gr.Button("", elem_classes=["role-badge-btn"], scale=1, visible=False)
 
         # 2 ── Schema reference accordion (ADMIN / ANALYST only; hidden until load)
         with gr.Accordion(
@@ -583,6 +646,15 @@ def build_ui():
             elem_classes=["schema-ref"],
         ) as schema_accordion:
             schema_panel = gr.HTML("")
+
+        # 2a ── LLM call log (Admin only; hidden until role badge is clicked)
+        with gr.Accordion(
+            "🔧  LLM Call Log — model, rounds, and token usage this session",
+            open=False,
+            visible=False,
+            elem_classes=["schema-ref"],
+        ) as llm_log_accordion:
+            llm_log_panel = gr.HTML("")
 
         # 3 ── Query input
         msg_box = gr.Textbox(
@@ -749,8 +821,12 @@ def build_ui():
         for btn, tpl in tpl_btns:
             btn.click(fn=fill_input, inputs=gr.State(tpl), outputs=msg_box)
 
-        demo.load(fn=build_heading, outputs=heading)
+        demo.load(fn=build_heading, outputs=[heading, role_badge_btn])
         demo.load(fn=build_schema_panel, outputs=[schema_accordion, schema_panel])
+
+        role_badge_btn.click(
+            fn=toggle_llm_log, outputs=[llm_log_accordion, llm_log_panel]
+        )
 
     return demo
 

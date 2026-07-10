@@ -11,16 +11,20 @@ Flow per user turn:
 """
 
 import json
+import logging
 import os
 
 from groq import Groq
 from dotenv import load_dotenv
 
+from agent.call_log import record as record_call
 from agent.system_prompt import build as build_prompt
 from auth.roles import Role, VIEWER_TEMPLATES
 from database.logger import log_query
 from guardrails.input_guardrail import check as input_check
 from mcp.tools import TOOL_DECLARATIONS, dispatch
+
+logger = logging.getLogger(__name__)
 
 load_dotenv()
 
@@ -101,13 +105,28 @@ class QueryAgent:
         last_msg = None
 
         # ── agentic tool loop ──────────────────────────────────────────────
-        for _ in range(_MAX_TOOL_ROUNDS):
+        for round_num in range(_MAX_TOOL_ROUNDS):
             response = self._client.chat.completions.create(
                 model=_MODEL_NAME,
                 messages=messages,
                 tools=_TOOLS,
                 tool_choice="auto",
                 max_tokens=4096,
+            )
+            usage = response.usage
+            logger.info(
+                "[QueryAgent] round=%d model=%s messages=%d prompt_tokens=%s completion_tokens=%s total_tokens=%s",
+                round_num, _MODEL_NAME, len(messages),
+                usage.prompt_tokens if usage else None,
+                usage.completion_tokens if usage else None,
+                usage.total_tokens if usage else None,
+            )
+            record_call(
+                username, agent="QueryAgent", model=_MODEL_NAME, round_num=round_num,
+                deep=None, messages=len(messages),
+                prompt_tokens=usage.prompt_tokens if usage else None,
+                completion_tokens=usage.completion_tokens if usage else None,
+                total_tokens=usage.total_tokens if usage else None,
             )
             last_msg = response.choices[0].message
 

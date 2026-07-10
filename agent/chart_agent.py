@@ -17,6 +17,7 @@ from dotenv import load_dotenv
 
 logger = logging.getLogger(__name__)
 
+from agent.call_log import record as record_call
 from auth.roles import Role
 from mcp.tools import TOOL_DECLARATIONS, dispatch
 
@@ -194,6 +195,7 @@ class ChartAgent:
         columns: list,
         user_question: str,
         role: Role,
+        username: str = "chart_agent",
         deep_insights: bool = False,
     ) -> tuple[str | None, str | None]:
         """Return (chart_json, insights_text)."""
@@ -244,6 +246,21 @@ class ChartAgent:
                 tools=tools,
                 tool_choice="auto",
                 max_tokens=2048 if deep_insights else 1024,
+            )
+            usage = response.usage
+            logger.info(
+                "[ChartAgent] round=%d deep=%s model=%s messages=%d prompt_tokens=%s completion_tokens=%s total_tokens=%s",
+                round_num, deep_insights, _MODEL_NAME, len(messages),
+                usage.prompt_tokens if usage else None,
+                usage.completion_tokens if usage else None,
+                usage.total_tokens if usage else None,
+            )
+            record_call(
+                username, agent="ChartAgent", model=_MODEL_NAME, round_num=round_num,
+                deep=deep_insights, messages=len(messages),
+                prompt_tokens=usage.prompt_tokens if usage else None,
+                completion_tokens=usage.completion_tokens if usage else None,
+                total_tokens=usage.total_tokens if usage else None,
             )
             msg = response.choices[0].message
 
