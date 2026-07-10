@@ -128,6 +128,12 @@ Order Insights is a **natural-language analytics agent** for retail order data. 
 │                     CSV → HF Dataset     │
 │                     query_logs table     │
 │                     scheduled_reports    │
+├──────────────────────────────────────────┤
+│  OBSERVABILITY      agent/call_log.py    │
+│  (Admin only, §9)   stdout + in-memory   │
+│                     per-user ring buffer │
+│                     of Groq call/token   │
+│                     usage this session   │
 └──────────────────────────────────────────┘
 ```
 
@@ -206,11 +212,11 @@ User    Gradio   Auth   Guardrail  QueryAgent   Groq     DuckDB  ChartAgent  Gro
 
 ## 6. RBAC Model
 
-| Role | Free-form Query | Raw Row Access | Row Limit | Allowed Charts | Schema Accordion | Can Query query_logs |
-|------|:--------------:|:--------------:|:---------:|:--------------:|:----------------:|:--------------------:|
-| ADMIN | ✅ | ✅ | 10,000 | All | ✅ | ✅ |
-| ANALYST | ✅ | ❌ (aggregates only) | 1,000 | All | ✅ | ❌ |
-| VIEWER | ❌ (templates only) | ❌ | 100 | Limited | ❌ | ❌ |
+| Role | Free-form Query | Raw Row Access | Row Limit | Allowed Charts | Schema Accordion | Can Query query_logs | LLM Call Log (§9) |
+|------|:--------------:|:--------------:|:---------:|:--------------:|:----------------:|:--------------------:|:------------------:|
+| ADMIN | ✅ | ✅ | 10,000 | All | ✅ | ✅ | ✅ |
+| ANALYST | ✅ | ❌ (aggregates only) | 1,000 | All | ✅ | ❌ | ❌ |
+| VIEWER | ❌ (templates only) | ❌ | 100 | Limited | ❌ | ❌ | ❌ |
 
 Credentials loaded from environment variables at startup — never hardcoded.
 
@@ -288,7 +294,59 @@ The tool loop uses the **OpenAI function-calling format** (Groq is OpenAI-compat
 
 ---
 
-## 8. Technology Decisions
+## 8. Voice Input ("Ask Aloud")
+
+Users can speak their question instead of typing it. The recording is transcribed to text via Groq's hosted Whisper model, then fed into the **exact same** `respond()` pipeline used for typed input — voice is not a separate trust boundary; the same guardrails and RBAC apply unchanged.
+
+```
+Click record → speak → click stop
+        │
+        ▼
+gr.Audio (type="filepath") saves the browser recording to disk
+        │
+        ▼
+agent/voice.py :: transcribe_audio()  ──▶  Groq Whisper (whisper-large-v3-turbo)
+        │
+        ▼
+app.py :: voice_respond()
+        │
+   ┌────┴──────┐
+   │  empty /   │──▶ "I didn't catch that — please try recording again…"
+   │  <3 chars  │    (mirrors the input guardrail's own length threshold,
+   └────┬──────┘     but gives a clearer, voice-specific message)
+        │ real text
+        ▼
+respond() — identical pipeline to typed input (Layer 1 guardrail → QueryAgent → ChartAgent)
+```
+
+**Why a separate `voice_respond()` wrapper:** Whisper occasionally returns an empty or near-empty transcript when a recording is mostly silence — e.g. speech starting right as the mic activates. Left alone, that empty string falls through to the generic input-guardrail rejection ("Please ask a more specific question."), which is a confusing message when the real cause was a bad recording, not a bad question. `voice_respond()` intercepts that specific case before the guardrail sees it and prompts a retry instead.
+
+**A real production incident:** the Docker image originally shipped without `ffmpeg`. Gradio's `Audio` component needs it to convert the browser's recorded webm/ogg stream into a file Whisper can read; without it, every voice query transcribed to an empty string and silently failed — with zero trace in the logs, because a guardrail rejection happens *before* any Groq call is made, so there's nothing to log. See §16 for how that was diagnosed.
+
+**TTS ("Listen to answer"):** the browser's built-in `speechSynthesis` API, entirely client-side JS — zero API calls, zero new dependencies. Deliberately avoids Groq's paid per-character TTS endpoint.
+
+---
+
+## 9. Admin Observability — LLM Call Log
+
+Every Groq `chat.completions` call made by QueryAgent or ChartAgent is recorded — model, round number, message count, and prompt/completion/total token usage — to two places:
+
+1. **stdout**, via the standard `logging` module (visible in the HF Space's container logs).
+2. **An in-memory, per-user ring buffer** (`agent/call_log.py`, capped at 50 calls/user), surfaced live in the UI.
+
+Admins click their role badge (the "username · ADMIN" pill, top right) to open a popup listing these calls, most recent first; clicking again refreshes it. Gated by the existing `can_see_logs` RBAC flag — Analyst and Viewer see the same badge, but clicking it is a server-side no-op (checked in `toggle_llm_log()`, not merely hidden in the UI).
+
+**Why in-memory instead of a DB table:** this is a developer/debugging aid, not an audit trail — that's what `query_logs` is for. It doesn't need to survive an app restart, and a dict-of-deques avoids adding DuckDB write load on every LLM round-trip.
+
+**Two implementation dead-ends worth knowing, since both looked reasonable and both failed:**
+
+- *Styling the badge as a `gr.Button`.* CSS was applied to make a real Gradio Button look like the original pill (first `all:unset` + hand-rolled styles, then Gradio's own `size="sm"`/`variant="secondary"`). Neither ever visibly changed the button's size — it kept rendering at Gradio's compiled default, most likely because the selectors weren't reaching whatever element actually governs the Button component's box model in this Gradio version, and there was no easy way to inspect that without a live browser session. Rather than keep guessing at internal markup, the badge was rebuilt as plain HTML — the *original* pill `<span>`, pixel-identical by construction — with an `onclick` that triggers a separate, permanently `display:none` Gradio Button (`#llm-log-trigger`) via a few lines of JS DOM traversal. This fully decouples "what it looks like" (HTML/CSS we fully control) from "how the click reaches Python" (a native Gradio event listener we never have to style).
+
+- *Toggling the popup via the component's own `visible=True/False`.* Custom CSS on the overlay (`position:fixed`, full-screen backdrop) needed a `display` value to lay itself out, and any `display` declaration there — even without `!important` — kept winning the cascade against whatever Gradio does internally to hide a `visible=False` component. Net effect: the modal was permanently open and its full-screen `z-index:1000` overlay blocked every click on the page, including login. Fixed by never toggling `visible` for this component at all — it stays permanently `visible=True`, and open/closed state is driven purely by our own `llm-modal-open` CSS class via `elem_classes`, so there's nothing left for Gradio's internals to conflict with.
+
+---
+
+## 10. Technology Decisions
 
 ### LLM — Groq + llama-4-scout-17b
 
@@ -344,7 +402,7 @@ The tool loop uses the **OpenAI function-calling format** (Groq is OpenAI-compat
 
 ---
 
-## 9. Database Tables
+## 11. Database Tables
 
 All tables live in a single DuckDB file (`customerserve.duckdb`).
 
@@ -427,7 +485,7 @@ No product-name column exists — `product_id` is a raw numeric ID with no displ
 
 ---
 
-## 10. Data Flow — Startup
+## 12. Data Flow — Startup
 
 ```
 Docker container starts
@@ -459,7 +517,7 @@ Ready to serve requests
 
 ---
 
-## 11. Deployment Architecture
+## 13. Deployment Architecture
 
 ```
 GitHub (origin)
@@ -480,7 +538,7 @@ Tag v1.0 = last known-good interview version (rollback point)
 
 ---
 
-## 12. What Is Out of Scope
+## 14. What Is Out of Scope
 
 | Feature | Why excluded |
 |---------|-------------|
@@ -494,7 +552,7 @@ Tag v1.0 = last known-good interview version (rollback point)
 
 ---
 
-## 13. Known Limitations & Critical Missing Items
+## 15. Known Limitations & Critical Missing Items
 
 These are gaps you should be ready to discuss in interviews:
 
@@ -506,15 +564,16 @@ These are gaps you should be ready to discuss in interviews:
 | **No test suite** | Regressions in SQL guardrails or tool dispatch go undetected | Add pytest suite covering guardrail edge cases and tool dispatcher |
 | **Static dataset** | Insights are not from live business data | Add a data ingestion pipeline (e.g. nightly CSV refresh from an S3 bucket) |
 | **Single-process / single-instance** | Cannot scale horizontally; one crash kills all users | Move to a queue-backed architecture (Celery + Redis) for the agent |
-| **No observability** | query_logs table exists but no dashboards or alerts | Add Grafana or a lightweight monitoring layer on top of query_logs |
+| **No persistent observability** | `query_logs` table exists, and Admins can see live per-session LLM call/token usage (§9), but neither has dashboards, alerts, or history beyond the current process — the call log resets on every restart/redeploy | Persist LLM call records to a table (or Grafana on top of `query_logs`) for historical token-usage trends and alerting |
 | **Deep insights enrichment** | Model may call `get_schema` and `build_chart` together then skip `query_database` — code-enforced nudge mitigates this but is a workaround for model non-compliance | Use `tool_choice` to enforce specific tool call order, or move enrichment into deterministic code rather than relying on the LLM to call it |
 | **LLM hallucination on SQL** | The model occasionally generates wrong column names or logic | Add a SQL validation step that runs EXPLAIN before execution |
 | **Groq free-tier limits** | Rate limits and monthly token caps can break the app silently | Add fallback error messaging and consider a paid tier for demos |
 | **No prompt versioning** | System prompt changes are not tracked or A/B tested | Store prompt versions in code and log which version was used per query |
+| **Insights capped at 200 rows** | `ChartAgent` only shows the AI the first 200 rows of a result set (`_MAX_ROWS_TO_CHART` in `agent/chart_agent.py`). For aggregated queries (GROUP BY month/category) this is rarely hit, but a large, non-aggregated result set would have its insights based on a partial, arbitrarily-ordered sample rather than the full data | Aggregate before sending to the AI, or explicitly flag to the model when it's seeing a partial sample so it can caveat its insights |
 
 ---
 
-## 14. Interview Talking Points
+## 16. Interview Talking Points
 
 **"Walk me through your architecture."**
 > Single-process Python app with a two-agent pipeline. Gradio handles UI and auth. A QueryAgent talks to Groq to write SQL and retrieve data. The rows are handed off to a ChartAgent, which independently decides the best visualisation and surfaces 3 narrative insight bullets structured as headline → story beat → exploration hook. There's also an optional deep insights mode where the ChartAgent runs a follow-up enrichment query — `get_schema` then `query_database` — to fetch the time or comparison dimension missing from the original result, producing richer narrative bullets. The model tends to bundle `get_schema` with `build_chart` and skip the enrichment query, so the code detects that pattern and injects a prompt nudge to force it. Everything runs in one Docker container on HuggingFace Spaces free tier.
@@ -539,3 +598,9 @@ These are gaps you should be ready to discuss in interviews:
 
 **"Why two HuggingFace Spaces?"**
 > Staging vs production. The `main` branch deploys to the stable interview Space which I never touch mid-demo. The `dev` branch deploys to a private dev Space where I iterate freely. When a change is validated on dev, I merge to main and promote it. The `v1.0` git tag gives me a rollback point if something goes badly wrong.
+
+**"Tell me about a bug you had to debug in production."**
+> Users started getting "Please ask a more specific question" on every voice query — the input guardrail's message for queries under 3 characters, which was odd for real spoken questions. The container logs showed successful runs immediately before and after each failure, with zero trace of the failure itself — because a guardrail rejection happens *before* any Groq call is made, so there's genuinely nothing to log. That absence of evidence was the actual clue: it meant Whisper was returning an empty transcript for some recordings. Root cause was a missing `ffmpeg` in the Docker image — Gradio's `Audio` component needs it to convert the browser's mic recording into a file Whisper can read. I fixed the missing dependency, then separately improved the UX so an empty/near-empty transcription shows a "try recording again" prompt instead of the generic guardrail message, since the two failure causes look identical to the guardrail but mean very different things to the user.
+
+**"How would you debug something you can't reproduce locally?"**
+> This came up building the LLM Call Log popup — my local Python version couldn't install the project's pinned dependencies, so every CSS/layout iteration had to be verified live on the `hf-dev` Space instead of in a local browser. Two rounds of guesses at Gradio's internal component markup (trying to restyle a `gr.Button`, then trying to toggle a modal via its `visible` prop) both failed in ways that weren't obvious from reading the code — the fixes only became clear from what the user actually saw happen. Eventually I stopped guessing at Gradio's internals altogether: rebuilt the badge as plain HTML I fully control, and made the popup's visibility depend only on our own CSS class rather than Gradio's own show/hide — removing the guesswork instead of trying to out-guess it.
