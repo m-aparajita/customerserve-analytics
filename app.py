@@ -167,34 +167,13 @@ button:not(.primary):hover {
     box-shadow: none !important;
 }
 
-/* ── Role badge (click to open LLM call log) ── */
-.heading-row {
-    display: flex !important;
-    justify-content: space-between !important;
-    align-items: flex-start !important;
-    flex-wrap: nowrap !important;
-    gap: 0.75rem !important;
-}
-.heading-row > *:first-child { flex: 1 1 auto !important; min-width: 0 !important; }
-.heading-row > *:last-child { flex: 0 0 auto !important; padding-top: 0.35rem !important; }
-/* Small pill badge — rely on Gradio's own size="sm" for compact sizing
-   (a full all:unset reset kept losing to Gradio's default button box
-   model, leaving an oversized primary-button-shaped element), and only
-   override colour/shape here. Descendant (not direct-child) selector so
-   it matches regardless of how deep Gradio nests the real <button>. */
-.role-badge-btn, .role-badge-btn button {
-    background: linear-gradient(135deg,#7c3aed,#0891b2) !important;
-    color: #ffffff !important;
-    border: none !important;
-    border-radius: 999px !important;
-    font-weight: 700 !important;
-    letter-spacing: 0.05em !important;
-    box-shadow: 0 2px 10px rgba(124,58,237,0.30) !important;
-    min-width: unset !important;
-    width: auto !important;
-    flex-grow: 0 !important;
-}
-.role-badge-btn:hover, .role-badge-btn button:hover { filter: brightness(1.08) !important; }
+/* ── Role badge (click to open LLM call log) ──
+   The badge itself is plain HTML (see _heading_html) styled exactly like
+   the original static pill — no Gradio Button CSS to fight. The click
+   handler lives on a completely separate, permanently display:none
+   Gradio Button (#llm-log-trigger) that the badge's onclick triggers via
+   JS. Nothing here needs to fight Gradio's own component internals. */
+#llm-log-trigger, #llm-log-trigger button { display: none !important; }
 
 /* ── LLM call log popup ──
    The component itself stays visible=True at the Gradio level at all
@@ -281,26 +260,52 @@ button:not(.primary):hover {
 
 # ── Static HTML blocks ────────────────────────────────────────────────────────
 
-def _heading_html() -> str:
-    return """
-<div style="padding:1.25rem 0 0.5rem;">
-  <h1 style="font-family:'Space Grotesk',sans-serif;
-             font-size:clamp(1.8rem,4vw,2.6rem);
-             font-weight:700;
-             letter-spacing:-0.025em;
-             line-height:1.15;
-             margin:0 0 0.55rem;
-             color:#3b0764;">
-    Order Insights
-  </h1>
-  <p style="font-size:0.92rem;
-            color:#374151;
-            line-height:1.65;
-            margin:0;
-            max-width:560px;
-            font-family:Inter,sans-serif;">
-    Ask questions in plain English — get instant charts and insights, and schedule email reports.
-  </p>
+def _heading_html(username: str = "", role_label: str = "") -> str:
+    badge = ""
+    if username:
+        # Plain HTML pill, identical to the original static badge. Clicking it
+        # triggers the hidden #llm-log-trigger Gradio Button via JS — Admin
+        # only in effect (toggle_llm_log no-ops for other roles), but the
+        # click target itself is harmless to expose to everyone.
+        badge = (
+            f"<span onclick=\""
+            f"var b=document.getElementById('llm-log-trigger');"
+            f"var t=b&&(b.tagName==='BUTTON'?b:b.querySelector('button'));"
+            f"if(t)t.click();"
+            f"\" style='"
+            f"cursor:pointer;"
+            f"background:linear-gradient(135deg,#7c3aed,#0891b2);"
+            f"color:#ffffff;"
+            f"padding:5px 16px;border-radius:999px;"
+            f"font-size:0.78rem;font-weight:700;"
+            f"font-family:Inter,sans-serif;letter-spacing:0.05em;"
+            f"box-shadow:0 2px 10px rgba(124,58,237,0.30);'>"
+            f"{username}&nbsp;·&nbsp;{role_label}"
+            f"</span>"
+        )
+    return f"""
+<div style="display:flex;justify-content:space-between;align-items:flex-start;
+            padding:1.25rem 0 0.5rem;">
+  <div>
+    <h1 style="font-family:'Space Grotesk',sans-serif;
+               font-size:clamp(1.8rem,4vw,2.6rem);
+               font-weight:700;
+               letter-spacing:-0.025em;
+               line-height:1.15;
+               margin:0 0 0.55rem;
+               color:#3b0764;">
+      Order Insights
+    </h1>
+    <p style="font-size:0.92rem;
+              color:#374151;
+              line-height:1.65;
+              margin:0;
+              max-width:560px;
+              font-family:Inter,sans-serif;">
+      Ask questions in plain English — get instant charts and insights, and schedule email reports.
+    </p>
+  </div>
+  <div style="flex-shrink:0;padding-top:0.35rem;">{badge}</div>
 </div>
 <hr style="border:none;border-top:2px solid #ede9fe;margin:0.5rem 0 0;">
 """
@@ -657,13 +662,12 @@ def build_schema_panel(request: gr.Request) -> tuple:
     return gr.update(visible=True), gr.update(value=get_schema_html())
 
 
-def build_heading(request: gr.Request) -> tuple:
+def build_heading(request: gr.Request) -> str:
     threading.Thread(target=_run_due_schedules, daemon=True).start()
     if not request or not request.username:
-        return _heading_html(), gr.update(visible=False)
+        return _heading_html()
     role = get_role(request.username)
-    label = f"{request.username} · {role.value.upper()}"
-    return _heading_html(), gr.update(value=label, visible=True)
+    return _heading_html(request.username, role.value.upper())
 
 
 def toggle_llm_log(request: gr.Request) -> tuple:
@@ -693,13 +697,10 @@ def build_ui():
         css=CSS,
     ) as demo:
 
-        # 1 ── Heading + description + role badge
-        with gr.Row(elem_classes=["heading-row"]):
-            heading = gr.HTML(value=_heading_html())
-            role_badge_btn = gr.Button(
-                "", elem_classes=["role-badge-btn"], visible=False,
-                size="sm", variant="secondary",
-            )
+        # 1 ── Heading + description + role badge (badge is plain HTML;
+        #      clicking it triggers the hidden button below via JS)
+        heading = gr.HTML(value=_heading_html())
+        llm_log_trigger = gr.Button("open log", elem_id="llm-log-trigger")
 
         # 2 ── Schema reference accordion (ADMIN / ANALYST only; hidden until load)
         with gr.Accordion(
@@ -885,10 +886,10 @@ def build_ui():
         for btn, tpl in tpl_btns:
             btn.click(fn=fill_input, inputs=gr.State(tpl), outputs=msg_box)
 
-        demo.load(fn=build_heading, outputs=[heading, role_badge_btn])
+        demo.load(fn=build_heading, outputs=heading)
         demo.load(fn=build_schema_panel, outputs=[schema_accordion, schema_panel])
 
-        role_badge_btn.click(
+        llm_log_trigger.click(
             fn=toggle_llm_log, outputs=[llm_log_modal, llm_log_panel]
         )
         llm_log_close_btn.click(
