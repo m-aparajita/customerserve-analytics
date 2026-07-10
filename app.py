@@ -466,6 +466,21 @@ def voice_to_text(audio_path: str) -> str:
     return transcribe_audio(audio_path)
 
 
+def voice_respond(message: str, history: list, deep_insights: bool, request: gr.Request):
+    """Wraps respond() for the Ask Aloud path so a silent/too-short recording
+    gets a retry prompt instead of the generic input-guardrail message."""
+    if len(message.strip()) < 3:
+        history = history + [
+            {"role": "assistant", "content": (
+                "I didn't catch that — please try recording again, and pause "
+                "a moment after pressing record before you start speaking."
+            )},
+        ]
+        return ("", history, None, gr.update(visible=False), gr.update(visible=False),
+                gr.update(visible=False), "", "", "", "")
+    return respond(message, history, deep_insights, request)
+
+
 def schedule_report(
     email: str,
     freq: str,
@@ -690,7 +705,7 @@ def build_ui():
         voice_input.stop_recording(
             fn=voice_to_text, inputs=[voice_input], outputs=[msg_box]
         ).then(
-            fn=respond, inputs=[msg_box, chatbot, deep_insights_chk], outputs=_respond_outputs
+            fn=voice_respond, inputs=[msg_box, chatbot, deep_insights_chk], outputs=_respond_outputs
         )
 
         # Listen to answer: browser speechSynthesis, client-side only, no API call.
