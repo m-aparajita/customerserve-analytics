@@ -196,13 +196,16 @@ button:not(.primary):hover {
 }
 .role-badge-btn:hover, .role-badge-btn > button:hover { filter: brightness(1.08) !important; }
 
-/* ── LLM call log popup ── */
+/* ── LLM call log popup ──
+   Note: no !important on display — Gradio hides this component via an
+   inline `display:none` when visible=False, and an !important here would
+   permanently override that and leave the overlay stuck open. */
 .llm-modal-overlay {
     position: fixed !important;
     inset: 0 !important;
     background: rgba(30,27,75,0.55) !important;
     z-index: 1000 !important;
-    display: flex !important;
+    display: flex;
     align-items: center !important;
     justify-content: center !important;
     padding: 1.5rem !important;
