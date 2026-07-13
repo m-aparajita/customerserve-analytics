@@ -45,13 +45,13 @@ Order Insights is a **natural-language analytics agent** for retail order data. 
 │                    ┌─────────▼──────────┐                      │
 │                    │   QueryAgent       │                      │
 │                    │  get_schema +      │◀──▶ Groq API         │
-│                    │  query_database    │     llama-4-scout    │
+│                    │  query_database    │     gpt-oss-120b     │
 │                    └─────────┬──────────┘                      │
 │                         rows │                                  │
 │                    ┌─────────▼──────────┐                      │
 │                    │   ChartAgent       │                      │
 │                    │  build_chart +     │◀──▶ Groq API         │
-│                    │  key insights      │     llama-4-scout    │
+│                    │  key insights      │     gpt-oss-120b     │
 │                    └──┬─────────────────┘                      │
 │                       │                                         │
 │              ┌────────▼┐  ┌──────────┐                        │
@@ -154,18 +154,13 @@ User    Gradio   Auth   Guardrail  QueryAgent   Groq     DuckDB  ChartAgent  Gro
  │         │       │  PASS              │          │         │        │         │
  │         │       │────────────────────▶          │         │        │         │
  │         │       │        │  ROUND 1  │          │         │        │         │
- │         │       │        │  messages ──────────▶│         │        │         │
- │         │       │        │           │◀─tool: get_schema  │        │         │
- │         │       │        │           │─────────────────────▶       │         │
- │         │       │        │           │◀──────── schema ────│        │         │
- │         │       │        │  ROUND 2  │          │         │        │         │
- │         │       │        │  (schema)───────────▶│         │        │         │
- │         │       │        │           │◀─tool: query_db    │        │         │
+ │         │       │        │  messages (schema already in system prompt) ──▶  │
+ │         │       │        │           │◀─tool: query_db     │        │         │
  │         │       │        │  L3 check │          │         │        │         │
  │         │       │        │  PASS     │──────────────────────▶      │         │
  │         │       │        │           │◀────────── rows ────│        │         │
- │         │       │        │  ROUND 3  │          │         │        │         │
- │         │       │        │  (rows) ──────────── ▶│         │        │         │
+ │         │       │        │  ROUND 2  │          │         │        │         │
+ │         │       │        │  (rows, capped to 40) ────────▶│         │        │         │
  │         │       │        │           │◀─ text answer       │        │         │
  │         │       │        │           │          │         │        │         │
  │         │  ── rows passed to ChartAgent ──────────────────────────▶│         │
@@ -174,11 +169,13 @@ User    Gradio   Auth   Guardrail  QueryAgent   Groq     DuckDB  ChartAgent  Gro
  │         │       │        │           │          │         │        │◀─tool: build_chart
  │         │       │        │           │          │         │        │ render Plotly fig
  │         │       │        │           │          │         │  ROUND 2          │
- │         │       │        │           │          │         │  (chart done)─────▶
+ │         │       │        │           │          │         │  (chart confirmed)─▶
  │         │       │        │           │          │         │        │◀─insights text
  │         │       │        │           │          │         │        │         │
  │◀─ text + chart + insights ─────────────────────────────────────────│         │
 ```
+
+`get_schema` is still a declared tool for QueryAgent — the model can call it if it suspects the embedded schema is stale — but it's no longer forced on round 1.
 
 ---
 
@@ -230,15 +227,18 @@ The system uses two specialised agents that run sequentially per user turn.
 Owns data retrieval. Runs a tool loop (max 8 rounds):
 
 ```
-Round 1:  LLM receives user question → calls get_schema()   ← cache hit (pre-warmed at startup)
-Round 2:  LLM receives schema        → calls query_database(sql)
-Round 3:  LLM receives rows          → writes text answer
+Round 1:  LLM receives user question, schema already embedded in system prompt
+                                      → calls query_database(sql)
+Round 2:  LLM receives rows (capped to 40 for context, full set kept for charting)
+                                      → writes text answer
           Loop exits → returns (text, rows)
 ```
 
-**Why get_schema first:** The model cannot write correct SQL without knowing column names. This eliminates hallucinated columns — a common failure mode in text-to-SQL systems.
+**Why the schema is embedded, not fetched:** The model still can't write correct SQL without knowing column names — that hasn't changed. What changed (2026-07) is *how* it learns them: `agent/system_prompt.py::build()` inlines a compact listing from `get_schema_compact()` instead of forcing a `get_schema` tool round every turn. That saved a full round trip per query, which mattered once Groq's free-tier TPM dropped from 30K to 8K on the models that replaced `llama-4-scout`. `get_schema` is still a declared tool, used as a fallback.
 
-**Schema caching:** `get_schema()` queries DuckDB once at startup and stores the result in `_schema_cache`. Every subsequent call returns instantly with no DB round-trip.
+**Schema caching:** `get_schema()` (and the compact variant built from it) queries DuckDB once at startup and stores the result in `_schema_cache`. Every subsequent call returns instantly with no DB round-trip.
+
+**Context budget:** `cap_rows_for_llm()` (`mcp/tools.py`) caps any tool result's row list to 40 before it re-enters the conversation — the RBAC row limit (up to 10,000 for admins) governs what reaches the chart/export path, not what the model needs to see to write a sentence.
 
 ### ChartAgent (`agent/chart_agent.py`)
 Owns visualisation and insight. Runs only when QueryAgent returns rows. Two modes:
@@ -278,7 +278,9 @@ Bullets are always structured: headline → story beat → exploration hook.
 
 **Key implementation detail — `data` not in tool schema:** The ChartAgent's `build_chart` schema deliberately omits the `data` parameter. The agent injects `fn_args["data"] = rows` before calling dispatch. This avoids a Groq validation error where the LLM would JSON-stringify the array into a string. The LLM only specifies `chart_type`, `x_col`, `y_col`, and `title`.
 
-**Defensive guard — duplicate axis columns:** Groq's llama-4-scout occasionally picks the same column for both `x_col` and `y_col` (e.g. charting `order_status` against itself), producing a meaningless chart. `build_chart` in `mcp/tools.py` detects this and auto-substitutes a different numeric column for `y_col` rather than rendering the broken result — a code-level fix for an LLM mistake that can't be reliably prompted away.
+**Defensive guard — duplicate axis columns:** the model occasionally picks the same column for both `x_col` and `y_col` (e.g. charting `order_status` against itself), producing a meaningless chart. `build_chart` in `mcp/tools.py` detects this and auto-substitutes a different numeric column for `y_col` rather than rendering the broken result — a code-level fix for an LLM mistake that can't be reliably prompted away.
+
+**Context budget — `build_chart`'s own tool result:** the raw Plotly figure (`fig.to_json()`) used to be sent straight back into the conversation, then resent on every later round. Since the model never needs the figure spec to write insight bullets, `ChartAgent.analyze()` now swaps it for a `{"status": "chart created", ...}` confirmation before appending it — one more piece of the 2026-07 TPM cleanup (see `cap_rows_for_llm()` above).
 
 ### Why separate agents?
 | Concern | QueryAgent | ChartAgent |
@@ -348,15 +350,17 @@ Admins click their role badge (the "username · ADMIN" pill, top right) to open 
 
 ## 10. Technology Decisions
 
-### LLM — Groq + llama-4-scout-17b
+### LLM — Groq + openai/gpt-oss-120b
 
 | Option considered | Decision |
 |------------------|----------|
 | OpenAI GPT-4o | ❌ Paid API, cost unpredictable at scale |
 | Anthropic Claude | ❌ No free tier for production |
-| Groq + llama-4-scout | ✅ Free tier, ~300 tokens/sec, tool-use capable, OpenAI-compatible |
+| Groq + gpt-oss-120b | ✅ Free tier, ~500 tokens/sec, tool-use capable, OpenAI-compatible |
 
 **Key point:** Groq's inference speed (~10× faster than typical cloud APIs) matters here because the agent makes 3–4 LLM calls per user question. Slow inference would make the UX feel broken.
+
+**Migration note (2026-07):** originally `meta-llama/llama-4-scout-17b-16e-instruct`; Groq deprecated it (shutdown 2026-07-17) and its free-tier replacements dropped TPM from 30K to 8K. Moved to `gpt-oss-120b` (Groq's recommended, production-status replacement) with `reasoning_effort="low"` to keep its hidden chain-of-thought from eating into that smaller budget, plus the context-trimming changes described in §7.
 
 ---
 
@@ -567,7 +571,7 @@ These are gaps you should be ready to discuss in interviews:
 | **No persistent observability** | `query_logs` table exists, and Admins can see live per-session LLM call/token usage (§9), but neither has dashboards, alerts, or history beyond the current process — the call log resets on every restart/redeploy | Persist LLM call records to a table (or Grafana on top of `query_logs`) for historical token-usage trends and alerting |
 | **Deep insights enrichment** | Model may call `get_schema` and `build_chart` together then skip `query_database` — code-enforced nudge mitigates this but is a workaround for model non-compliance | Use `tool_choice` to enforce specific tool call order, or move enrichment into deterministic code rather than relying on the LLM to call it |
 | **LLM hallucination on SQL** | The model occasionally generates wrong column names or logic | Add a SQL validation step that runs EXPLAIN before execution |
-| **Groq free-tier limits** | Rate limits and monthly token caps can break the app silently | Add fallback error messaging and consider a paid tier for demos |
+| **Groq free-tier limits** | Rate limits and monthly token caps can break the app silently. TPM dropped 30K→8K in the 2026-07 model migration; mitigated via schema embedding, row-capping, and history trimming (§7), but still a hard ceiling | Add fallback error messaging and consider a paid tier for demos |
 | **No prompt versioning** | System prompt changes are not tracked or A/B tested | Store prompt versions in code and log which version was used per query |
 | **Insights capped at 200 rows** | `ChartAgent` only shows the AI the first 200 rows of a result set (`_MAX_ROWS_TO_CHART` in `agent/chart_agent.py`). For aggregated queries (GROUP BY month/category) this is rarely hit, but a large, non-aggregated result set would have its insights based on a partial, arbitrarily-ordered sample rather than the full data | Aggregate before sending to the AI, or explicitly flag to the model when it's seeing a partial sample so it can caveat its insights |
 
@@ -585,7 +589,7 @@ These are gaps you should be ready to discuss in interviews:
 > DuckDB is an in-process analytical database — it runs inside the Python process with no server, no network, and no configuration. For read-heavy analytics workloads (GROUP BY, SUM, window functions), it outperforms SQLite significantly. It was the right choice for a single-container deployment where I couldn't run a separate database server.
 
 **"How does the agent know what SQL to write?"**
-> It doesn't hardcode any schema knowledge. Round 1 of the QueryAgent loop always calls `get_schema()` to discover the current tables and column names. This eliminates hallucinated column names and makes the system schema-agnostic — you can swap in a different database and it still works. The schema is pre-warmed into a module-level cache at startup, so the `get_schema` call is instant. The same cache powers the Schema Reference accordion in the UI for ADMIN and ANALYST users.
+> It doesn't hardcode any schema knowledge in the sense of a static prompt someone wrote by hand — `get_schema_compact()` builds the listing from DuckDB itself at startup and it's inlined into the system prompt. That eliminates hallucinated column names and keeps the system schema-agnostic — swap in a different database and the prompt regenerates itself. It used to be a `get_schema` tool call the model was forced to make on round 1 of every query; I moved it into the prompt in 2026-07 once Groq's free-tier TPM dropped enough that the extra round trip became the biggest avoidable cost. The `get_schema` tool is still there as a fallback, and the same underlying cache powers the Schema Reference accordion in the UI for ADMIN and ANALYST users.
 
 **"How do you prevent SQL injection or data leaks?"**
 > Three layers. Layer 1 filters the raw user input for prompt injection patterns. Layer 2 is the role-scoped system prompt — the model is instructed what it can and cannot do. Layer 3 validates the generated SQL before execution: only SELECT is allowed, dangerous clauses are stripped, and row limits are enforced per role. Even if the LLM were somehow manipulated, it cannot write a DELETE or expose another user's data.
