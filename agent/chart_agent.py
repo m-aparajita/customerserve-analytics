@@ -19,11 +19,11 @@ logger = logging.getLogger(__name__)
 
 from agent.call_log import record as record_call
 from auth.roles import Role
-from mcp.tools import TOOL_DECLARATIONS, dispatch
+from mcp.tools import TOOL_DECLARATIONS, cap_rows_for_llm, dispatch
 
 load_dotenv()
 
-_MODEL_NAME = "meta-llama/llama-4-scout-17b-16e-instruct"
+_MODEL_NAME = "openai/gpt-oss-120b"
 _MAX_TOOL_ROUNDS = 3
 _MAX_TOOL_ROUNDS_DEEP = 6
 _MAX_ROWS_TO_CHART = 200
@@ -246,6 +246,7 @@ class ChartAgent:
                 tools=tools,
                 tool_choice="auto",
                 max_tokens=2048 if deep_insights else 1024,
+                reasoning_effort="low",
             )
             usage = response.usage
             logger.info(
@@ -299,6 +300,9 @@ class ChartAgent:
                     parsed = json.loads(result_str)
                     if "chart_json" in parsed:
                         chart_json = parsed["chart_json"]
+                        # The model never needs the figure spec back — just confirmation.
+                        # Keeping full fig.to_json() in context gets resent every later round.
+                        result_str = json.dumps({"status": "chart created", "chart_type": parsed.get("chart_type")})
                 elif fn_name == "query_database":
                     _enrichment_done = True
                     parsed = json.loads(result_str)
@@ -310,7 +314,7 @@ class ChartAgent:
                 messages.append({
                     "role": "tool",
                     "tool_call_id": call.id,
-                    "content": result_str,
+                    "content": cap_rows_for_llm(result_str),
                 })
 
         return chart_json, insights

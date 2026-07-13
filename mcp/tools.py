@@ -133,8 +133,23 @@ def get_schema() -> str:
                 "row_count": count,
                 "columns": [{"name": c[0], "type": c[1]} for c in cols],
             }
-    _schema_cache = json.dumps(schema, indent=2)
+    _schema_cache = json.dumps(schema)
     return _schema_cache
+
+
+def get_schema_compact() -> str:
+    """One-line-per-table column/type listing for embedding in a system prompt.
+
+    Cheaper than the full get_schema() JSON (no indentation, no row counts) —
+    used so QueryAgent doesn't have to spend a tool round fetching the schema
+    on every single turn.
+    """
+    schema = json.loads(get_schema())
+    lines = []
+    for tbl, info in schema.items():
+        cols = ", ".join(f"{c['name']} {c['type']}" for c in info["columns"])
+        lines.append(f"{tbl}({cols})")
+    return "\n".join(lines)
 
 
 def get_schema_html() -> str:
@@ -214,6 +229,26 @@ def query_database(sql: str, role: Role, username: str) -> str:
         log_query(username=username, role=role, generated_sql=safe_sql,
                   exec_ms=exec_ms, status="error", error_message=str(exc))
         return json.dumps({"error": str(exc)})
+
+
+def cap_rows_for_llm(result_str: str, max_rows: int = 40) -> str:
+    """Cap the 'rows' list in a tool result before it re-enters LLM context.
+
+    Row limits (up to 10,000 for admins) exist for charting/export, not for what
+    the model needs to see to write a sentence — an uncapped dump can blow well
+    past the free-tier TPM budget in a single tool round. Callers that need the
+    full result (e.g. for charting) must read it before calling this.
+    """
+    try:
+        parsed = json.loads(result_str)
+    except (json.JSONDecodeError, TypeError):
+        return result_str
+    rows = parsed.get("rows")
+    if not isinstance(rows, list) or len(rows) <= max_rows:
+        return result_str
+    parsed = {**parsed, "rows": rows[:max_rows],
+              "note": f"Showing first {max_rows} of {len(rows)} rows."}
+    return json.dumps(parsed, default=str)
 
 
 def get_sample_data(table: str, limit: int = 5) -> str:

@@ -22,15 +22,16 @@ from agent.system_prompt import build as build_prompt
 from auth.roles import Role, VIEWER_TEMPLATES
 from database.logger import log_query
 from guardrails.input_guardrail import check as input_check
-from mcp.tools import TOOL_DECLARATIONS, dispatch
+from mcp.tools import TOOL_DECLARATIONS, cap_rows_for_llm, dispatch
 
 logger = logging.getLogger(__name__)
 
 load_dotenv()
 
-_MODEL_NAME = "meta-llama/llama-4-scout-17b-16e-instruct"
+_MODEL_NAME = "openai/gpt-oss-120b"
 _MAX_TOOL_ROUNDS = 8
-_HISTORY_TURNS = 6
+_HISTORY_TURNS = 3
+_HISTORY_ANSWER_CHARS = 600
 
 # QueryAgent only handles schema + data retrieval; build_chart is owned by ChartAgent
 _TOOLS = [
@@ -94,6 +95,8 @@ class QueryAgent:
         # Build message list with system prompt and conversation history
         messages: list[dict] = [{"role": "system", "content": system_prompt}]
         for user_msg, assistant_msg in history[-_HISTORY_TURNS:]:
+            if len(assistant_msg) > _HISTORY_ANSWER_CHARS:
+                assistant_msg = assistant_msg[:_HISTORY_ANSWER_CHARS] + "…"
             messages.append({"role": "user", "content": user_msg})
             messages.append({"role": "assistant", "content": assistant_msg})
         messages.append({"role": "user", "content": user_query})
@@ -112,6 +115,7 @@ class QueryAgent:
                 tools=_TOOLS,
                 tool_choice="auto",
                 max_tokens=4096,
+                reasoning_effort="low",
             )
             usage = response.usage
             logger.info(
@@ -166,7 +170,7 @@ class QueryAgent:
                 messages.append({
                     "role": "tool",
                     "tool_call_id": call.id,
-                    "content": result_str,
+                    "content": cap_rows_for_llm(result_str),
                 })
 
         log_query(username=username, role=role, user_query=user_query, status="success")
