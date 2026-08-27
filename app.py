@@ -846,11 +846,26 @@ def build_ui():
         )
 
         # Listen to answer: browser speechSynthesis, client-side only, no API call.
+        # Reads the insight bullets (skipping a trailing bullet if it's a
+        # follow-up question — the "exploration hook" bullet in deep mode);
+        # falls back to the plain text answer when there are no insights.
         listen_btn.click(
             fn=None,
-            inputs=[current_answer],
+            inputs=[current_insights, current_answer],
             outputs=None,
-            js="""(text) => {
+            js="""(insights, answer) => {
+                let text = "";
+                if (insights) {
+                    let lines = insights.split("\\n")
+                        .map(l => l.trim())
+                        .filter(l => l.length > 0)
+                        .map(l => l.replace(/^[-•\\s]+/, ""));
+                    if (lines.length > 0 && lines[lines.length - 1].endsWith("?")) {
+                        lines = lines.slice(0, -1);
+                    }
+                    text = lines.map(l => l.replace(/[.!?]+$/, "")).join(". ");
+                }
+                if (!text) { text = answer || ""; }
                 if (!text) { return; }
                 window.speechSynthesis.cancel();
                 const utterance = new SpeechSynthesisUtterance(text);
