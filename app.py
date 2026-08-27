@@ -854,6 +854,11 @@ def build_ui():
             inputs=[current_insights, current_answer],
             outputs=None,
             js="""(insights, answer) => {
+                console.log("[Listen to answer] clicked. insights:", insights, "answer:", answer);
+                if (typeof window.speechSynthesis === "undefined") {
+                    console.error("[Listen to answer] speechSynthesis is not supported in this browser/context.");
+                    return;
+                }
                 let text = "";
                 if (insights) {
                     let lines = insights.split("\\n")
@@ -866,9 +871,15 @@ def build_ui():
                     text = lines.map(l => l.replace(/[.!?]+$/, "")).join(". ");
                 }
                 if (!text) { text = answer || ""; }
-                if (!text) { return; }
+                console.log("[Listen to answer] text to speak:", JSON.stringify(text));
+                if (!text) {
+                    console.warn("[Listen to answer] nothing to speak — insights and answer were both empty.");
+                    return;
+                }
                 window.speechSynthesis.cancel();
                 const utterance = new SpeechSynthesisUtterance(text);
+                utterance.onstart = () => console.log("[Listen to answer] speech started");
+                utterance.onerror = (e) => console.error("[Listen to answer] speechSynthesis error:", e.error);
                 window.speechSynthesis.speak(utterance);
             }""",
         )
