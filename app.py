@@ -789,8 +789,14 @@ def build_ui():
         # 10 ── Hidden state: carry current question / png / insights into schedule handler
         current_question = gr.State("")
         current_png      = gr.State("")
-        current_insights = gr.State("")
-        current_answer   = gr.State("")
+        # current_insights/current_answer are hidden Textboxes, not gr.State: the
+        # Listen-to-answer click handler is fn=None + js= (pure client-side, no
+        # server round-trip), and gr.State values are never mirrored into the
+        # browser — a js-only handler reading a State input always sees its
+        # stale initial value, not what respond() last set. A rendered Textbox's
+        # value IS synced to the client, so it works here.
+        current_insights = gr.Textbox(value="", visible=False)
+        current_answer   = gr.Textbox(value="", visible=False)
 
         # 11 ── Schedule panel (revealed after a chart is rendered)
         with gr.Accordion(
